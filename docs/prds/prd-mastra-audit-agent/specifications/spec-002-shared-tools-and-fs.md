@@ -35,5 +35,7 @@ Feature: 共有ツールと仮想ファイルシステムのレイアウト
 - [x] `src/clients/github.ts` で `createGitHubClient` + `getRepo` + `GitHubApiError` を fetch ベースの DI 可能な薄いラッパとして実装
 - [x] `src/clients/osv.ts` で `createOsvClient` + `query` + `OsvApiError` を実装
 - [x] `tests/clients/` で各クライアントの happy path / 認証ヘッダ / エラーハンドリング / baseUrl 差し替えをカバー
-- [ ] `src/tools/` 配下に共通のツール定義（`read_raw`, `write_raw`, `fetch_github`, `query_osv`）を配置
-- [ ] Review (typecheck + test + `/code-review`)
+- [x] `src/tools/fetch-github.ts` と `src/tools/query-osv.ts` で LangChain Tool を実装 (`@langchain/core/tools` + zod v4 スキーマ)
+- [x] `src/tools/index.ts` でツール群と `rawPath` 系ヘルパを barrel export
+- [x] `read_raw` / `write_raw` は独自 Tool として実装せず、deepagents の built-in ファイルツール + `rawPath()` 経由の system_prompt 指示に委譲する設計判断を採用 (理由: filesystemMiddleware の state にアクセスできる独立 Tool を作ると二重実装になるため)
+- [x] Review (typecheck + 34 tests pass + 設計判断を knowledge に記録)
