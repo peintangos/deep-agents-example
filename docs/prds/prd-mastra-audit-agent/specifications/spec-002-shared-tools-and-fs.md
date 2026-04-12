@@ -30,7 +30,8 @@ Feature: 共有ツールと仮想ファイルシステムのレイアウト
 
 ## Implementation Steps
 
-- [ ] `src/fs-layout.ts` で仮想 FS のディレクトリ定数とヘルパーを実装
+- [x] `src/fs-layout.ts` で仮想 FS のディレクトリ定数・型・ヘルパー (`rawPath`, `reportPath`, `memoryPath`, `classifyPath`) を実装
+- [x] `tests/fs-layout.test.ts` で prefix 定数 / 観点型 / パスビルダー / classifier (prefix 部分一致の罠含む) を検証
 - [ ] `src/clients/github.ts` で octokit を薄くラップしたクライアントを実装
 - [ ] `src/clients/osv.ts` で OSV API クライアントを実装
 - [ ] `src/tools/` 配下に共通のツール定義（`read_raw`, `write_raw`, `fetch_github`, `query_osv`）を配置

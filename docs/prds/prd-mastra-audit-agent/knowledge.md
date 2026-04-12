@@ -4,6 +4,12 @@
 
 <!-- Document patterns that should be reused in later tasks or later PRDs. -->
 
+### 仮想 FS のパス分類: 末尾スラッシュ込みの startsWith が正解
+
+`classifyPath("/raw/license/result.json") === "raw"` を実装するとき、うっかり `path.startsWith("/raw")` と書くと `/rawbit/data.json` も raw と誤判定してしまう (prefix 部分一致の罠)。正しくは `path.startsWith("/raw/")` のように**末尾スラッシュまで含めて** startsWith する。
+
+同様に "/raw" のような裸のプレフィックス自体は "transient" 扱いにする (`/raw` は本来ディレクトリであって、ファイルパスとしては意味を持たない)。
+
 ### CLI: pure 関数 + 薄い entry 分離パターン
 
 scripts/run-audit.ts にロジックを書くと、`import` した瞬間に `process.exit()` が発火してテストが書けない。対策として以下の分離を採用:
