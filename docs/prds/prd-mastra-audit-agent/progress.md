@@ -6,7 +6,7 @@ Use only these status values: `pending`, `in-progress`, `done`
 
 | Specification | Title | Status | Completed On | Notes |
 |---------------|-------|--------|--------------|-------|
-| spec-001-foundation-setup | 基盤セットアップと deepagents smoke test | in-progress | | 雛形 scaffold 完了。deepagents 依存追加と smoke test は次タスク |
+| spec-001-foundation-setup | 基盤セットアップと deepagents smoke test | done | 2026-04-12 | deepagents v1.9.0 の成熟度問題なし。CLI entry も分離した pure 関数 + 薄い entry 構成で実装 |
 | spec-002-shared-tools-and-fs | 共通ツール基盤と仮想 FS レイアウト | pending | | |
 | spec-003-audit-subagents | 監査サブエージェント実装 (5 観点) | pending | | |
 | spec-004-critic-and-report | critic サブエージェントとレポート統合 | pending | | |
@@ -18,5 +18,5 @@ Use only these status values: `pending`, `in-progress`, `done`
 
 ## Summary
 
-- Done: 0/9
-- Current focus: spec-001-foundation-setup
+- Done: 1/9
+- Current focus: spec-002-shared-tools-and-fs

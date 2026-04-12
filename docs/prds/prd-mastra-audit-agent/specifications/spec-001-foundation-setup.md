@@ -33,7 +33,9 @@ Feature: 基盤セットアップと最小動作確認
 - [x] `tsconfig.json` を生成（`strict: true`, `moduleResolution: bundler`, `target: ES2022`）
 - [x] `src/` と `tests/` ディレクトリを作成し、最小の `src/index.ts` を置く
 - [x] `package.json` の scripts に `typecheck` / `test` / `audit` を追加し、`ralph.toml` の `build_check` を `npm run typecheck` に更新
-- [ ] `deepagents` / `@langchain/anthropic` を依存追加（`tsx` / `vitest` は scaffold で導入済み）
-- [ ] `scripts/run-audit.ts` に CLI の最小実装（`--help` のみ対応）
-- [ ] `tests/smoke.test.ts` で `createDeepAgent()` の最小動作を検証
-- [ ] Review (typecheck + smoke test + `/code-review`)
+- [x] `deepagents` / `@langchain/anthropic` を依存追加（`tsx` / `vitest` は scaffold で導入済み）
+- [x] `src/agent.ts` に `createAuditAgent()` ファクトリを実装
+- [x] `tests/smoke.test.ts` で `createDeepAgent()` の最小動作を検証
+- [x] `src/cli.ts` に pure な `runCli()` を実装し、`scripts/run-audit.ts` を薄い entry として分離
+- [x] `tests/cli.test.ts` で `runCli()` の help / 引数なし / 未知オプションをテスト
+- [x] Review (typecheck + smoke test + cli test + 実 CLI 起動確認)
