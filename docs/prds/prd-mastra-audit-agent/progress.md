@@ -7,7 +7,7 @@ Use only these status values: `pending`, `in-progress`, `done`
 | Specification | Title | Status | Completed On | Notes |
 |---------------|-------|--------|--------------|-------|
 | spec-001-foundation-setup | 基盤セットアップと deepagents smoke test | done | 2026-04-12 | deepagents v1.9.0 の成熟度問題なし。CLI entry も分離した pure 関数 + 薄い entry 構成で実装 |
-| spec-002-shared-tools-and-fs | 共通ツール基盤と仮想 FS レイアウト | in-progress | | fs-layout 完了。GitHub / OSV クライアントは次タスク |
+| spec-002-shared-tools-and-fs | 共通ツール基盤と仮想 FS レイアウト | in-progress | | fs-layout + GitHub/OSV クライアント完了。残: src/tools/ のツール定義 |
 | spec-003-audit-subagents | 監査サブエージェント実装 (5 観点) | pending | | |
 | spec-004-critic-and-report | critic サブエージェントとレポート統合 | pending | | |
 | spec-005-long-term-memory | 長期メモリ統合 | pending | | |
