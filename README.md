@@ -1,14 +1,35 @@
-# Ralph Matsuo
+# deep-agents-example
 
-Docs-first workflow template for [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+LangChain [Deep Agents](https://github.com/langchain-ai/deepagents) (TypeScript) を使って OSS プロジェクト **[Mastra](https://github.com/mastra-ai/mastra)** を多観点で監査するエージェントのデモ実装と、その過程を Zenn 記事化するための作業リポジトリです。
 
-Ralph Matsuo gives Claude Code a stable execution contract built from Markdown documents instead of ad-hoc prompts. PRDs, specifications, dependencies, progress tracking, and todo lists become the shared control plane for:
+Deep Agents の主要機能（プランニング / サブエージェント / 仮想ファイルシステム / 長期メモリ / HITL / Skills / Middleware）を一通り使い切れる実用題材として「OSS 監査レポート自動生成」を題材に据え、動くデモとレポート成果物の両方を作ることを目的としています。
 
-- interactive execution with Claude Code skills
-- headless execution with Ralph Loop
-- GitHub Actions automation for PRD intake and implementation runs
+## About This Project
 
-If you want coding agents to work from explicit plans, take one task at a time, and keep planning artifacts updated as implementation moves, this repository is the template.
+### ゴール
+
+1. **動くデモ**: deep-agents の主要機能を必然性を持って使い切った TypeScript 実装
+2. **成果物**: Mastra を対象にした多観点監査レポート（ライセンス / セキュリティ / メンテナンス健全性 / API 安定性 / コミュニティ採用状況）
+3. **Zenn 記事**: 上記の実装プロセスと知見をまとめた技術記事
+
+### なぜ Mastra か
+
+- deep-agents の直接的なライバルとなる TypeScript の AI エージェントフレームワークで、Zenn 読者の関心が高い
+- 2025 年後半から急成長しており、ライセンス・依存関係・breaking change など監査観点ごとに "発見" が出やすい
+- "deep-agents でライバルを監査する" というメタ構造が記事としての引きを作る
+
+### 技術スタック
+
+- TypeScript / Node.js
+- [deepagentsjs](https://www.npmjs.com/package/deepagents) (LangChain Deep Agents の JS 版)
+- LangGraph.js
+- Claude Sonnet 4.6（メインエージェント）
+
+詳細な要件は [`docs/prds/prd-mastra-audit-agent/prd.md`](./docs/prds/prd-mastra-audit-agent/prd.md) を参照してください。
+
+## Workflow Foundation: Ralph Matsuo
+
+本リポジトリは [Ralph Matsuo](https://github.com/matsuo-jumpei/ralph-matsuo) というドキュメント駆動ワークフローテンプレートを土台にしています。計画はドキュメントを更新し、実装はドキュメントから読む、という docs-first な開発プロセスに従って作業を進めます。
 
 ## What Ralph Is
 

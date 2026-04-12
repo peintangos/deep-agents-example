@@ -1,7 +1,7 @@
 {
-  "name": "ralph-matsuo",
-  "version": "1.0.0",
-  "description": "Autonomous development framework powered by Claude Code",
+  "name": "deep-agents-example",
+  "version": "0.1.0",
+  "description": "Deep Agents (TypeScript) で Mastra OSS を多観点監査するデモ実装",
   "scripts": {
     "test": "bash -n scripts/*.sh scripts/ralph/*.sh .github/scripts/*.sh .claude/hooks/*.sh",
     "test:doc-contracts": "bash scripts/test-doc-contracts.sh",
