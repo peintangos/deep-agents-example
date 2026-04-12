@@ -1,0 +1,137 @@
+LangChainのDeep Agents（deepagents）について、網羅的に調査まとめました。
+Zenn記事執筆のために「最新動向〜基本機能〜実践例〜多角的視点」まで、公式ドキュメント・GitHub・ブログ・コミュニティ情報・日本語記事を基に整理しています。実際に試すための具体的な実験アイデアも入れましたので、ぜひそのまま記事の骨子に使ってください！
+1. Deep Agentsとは？（そもそも何ができるか）
+Deep Agents（deepagents）は、LangChain公式が提供する「agent harness（エージェント用ハーネス）」 です。
+単なるReActループではなく、複雑・長時間・多段階タスクに強い「深掘り型エージェント（deep agents）」 を即座に作れる opinionated（意見の強い）なライブラリです。
+設計思想（2025年7月30日の公式ブログより）
+
+「浅いエージェント（shallow agents）」の問題：ツール呼び出しループだけだと長時間計画が立てられず、コンテキストが破綻しやすい。
+「深いエージェント」の特徴：計画（planning）＋ファイルシステムによるコンテキスト管理＋サブエージェント委譲＋詳細なシステムプロンプト を組み合わせる（Claude Code、Deep Research、Manusから着想）。
+
+主なビルトイン機能（これが「できること」の核心）
+
+Planning：write_todosツールでタスクを分解→進捗追跡→計画修正（自動）。
+Virtual Filesystem：read_file/write_file/edit_file/ls/grepなど。巨大な検索結果や中間成果物をファイルにオフロードし、トークン節約＋長期コンテキスト保持。自動サマライズも搭載。
+Sub-agent spawning：taskツールで子エージェントを生成（コンテキスト隔離）。v0.5（2026/4/7）でasync subagents（非同期・バックグラウンド実行）追加。
+Shell / Sandbox実行：executeツールでコマンド実行（Modal、Daytona、Runloopなどサンドボックス対応）。
+Long-term Memory：LangGraphのMemory Store連携。会話越えの永続記憶（CLIではMarkdownファイル自動保存）。
+Multi-modal：v0.5でPDF/音声/動画もread_fileでネイティブ対応。
+Human-in-the-Loop（HITL）：LangGraphのinterruptで承認フロー。
+Skills：再利用可能なカスタム機能（ドメイン知識を注入）。
+
+技術スタック
+
+LangChainのagentビルディングブロックの上に構築
+実行ランタイムはLangGraph（永続化・ストリーミング・チェックポインター完備）
+→ つまり「LangChain + LangGraphの最高位の抽象化レイヤー」として位置づけられています。
+
+2. 最新動向（2026年4月12日現在）
+
+最新リリース：deepagents==0.5.2（2026/4/10）、deepagents-cli==0.0.37
+v0.5（4/7）：async subagents + 多モードファイル対応
+v0.4（2月）：サンドボックス拡張 + より賢い会話サマライズ
+
+GitHub stars 20.4k（急成長中）。JS/TS版（deepagentsjs）もあり。
+Deep Agents CLI正式リリース（2025/10）：ターミナル内でClaude Code並みのコーディングエージェント。永続記憶・スキル・サブエージェント完備。
+関連リポジトリ：quickstarts、deep-agents-ui、deep-agents-from-scratch（内部実装学習用）、NVIDIA OpenShell連携例など。
+LangChain Academyに専用コース「Project: Deep Agents」あり（無料）。
+コミュニティ：Xでは「docsがagentの教科書みたい」「Local LLMで試してる」投稿が活発。
+
+日本語でもすでに記事が出ています（2025/11〜2026/3）：
+
+Zenn：Local LLM × DeepAgentsで「使い放題AIエージェント」
+Qiita：Deep Agents入門（create_deep_agentの実践）
+note：LangChain 1.0 × Deep Agents完全ガイド
+
+3. 基本的な使い方（すぐ試せるQuickstart）
+Bashpip install deepagents tavily-python  # または uv add
+# APIキー設定（例）
+export ANTHROPIC_API_KEY=...
+export TAVILY_API_KEY=...
+Pythonfrom deepagents import create_deep_agent
+from tavily import TavilyClient
+import os
+
+tavily = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+
+def internet_search(query: str, max_results: int = 5):
+    """インターネット検索ツール"""
+    return tavily.search(query, max_results=max_results)
+
+agent = create_deep_agent(
+    model="anthropic:claude-sonnet-4-6",  # または openai:gpt-5.4, ollama:llama3.2 など
+    tools=[internet_search],
+    system_prompt="あなたは専門リサーチャーです。徹底的に調査し、洗練されたレポートを書いてください。"
+)
+
+result = agent.invoke({"messages": [{"role": "user", "content": "LangGraphとは何ですか？最新のユースケースを調べて"}]})
+print(result["messages"][-1].content)
+内部で自動的に起きること：
+
+write_todosで計画立案
+検索実行 → 結果をファイルに書き出し
+必要に応じてsub-agent生成
+最終レポート作成
+
+ストリーミングもLangGraphネイティブで簡単。
+4. 多様な観点で深掘り（Zenn記事向け構成案）
+技術的視点
+
+LangGraphのstateful graphを「harness」が隠蔽 → 自分でgraphを書かなくても生産性爆上がり。
+Context Engineeringのベストプラクティスを全部詰め込んでいる（ファイルオフロード＋サマライズ＋sub-agent）。
+
+実践的視点（試してほしい実験アイデア）
+
+Research Agent（公式quickstartそのまま）
+Local LLMで無限に試す（Ollama + devstral-2など）→ コストゼロ記事が書ける！
+Deep Agents CLIをフル活用
+deepagents起動 → ターミナル内で「このプロジェクトのAPI仕様をまとめてドキュメント化せよ」
+/rememberで記憶蓄積、AGENTS.mdで永続コンテキスト
+
+Multi-level Sub-agent（v0.5のasync対応で階層化）
+Sandbox + Coding Agent（Modal/Daytonaで安全にコード実行）
+Skillsでドメイン特化（例：自社プロダクト知識をSKILL.mdに書いて注入）
+Persistent Memoryテスト（別セッションで前回の記憶を参照させる）
+Multi-modal（PDF/画像をアップロードして解析）
+
+比較視点
+
+普通のLangChain/LangGraph agent → シンプルだが自分で全部組む必要あり
+Deep Agents → 即戦力だが「opinionated」なのでカスタマイズしにくい場面も
+CrewAI/AutoGen → チーム指向。Deep Agentsは「1つの深掘りエージェント＋サブエージェント」寄り
+
+コミュニティ・日本視点
+
+GitHub活発（issue/PR多い）
+日本ではLocal LLMとの相性が特に話題（コスト問題解決）
+LangSmithでトレース可 → プロダクション向き
+
+注意点・限界
+
+LLM呼び出し回数が多い → トークンコスト意識（ファイルオフロードで軽減）
+セキュリティ：本番は必ずsandbox推奨
+WindowsはCLI非公式（WSL推奨）
+
+5. Zenn記事執筆のオススメ構成
+
+導入：Deep Agentsが生まれた背景（shallow → deep）
+何ができるか（機能一覧＋デモGIF）
+5分で動かすQuickstart
+私が試した実験結果（CLI、Local LLM、Sub-agent、Memory）
+内部アーキテクチャ（LangGraphとの関係）
+最新アップデート（v0.5 async subagentsなど）
+他のフレームワークとの比較表
+まとめ：誰におすすめか（「複雑タスクをサクッと作りたい人」）
+
+これで最新性・網羅性・実践性の全部をカバーできます。
+実際にコードを動かしながらスクショやログを記事に貼ると読者ウケ抜群です！
+参考リンク（全部公式・最新）
+
+公式Docs: https://docs.langchain.com/oss/python/deepagents/overview
+Quickstart: https://docs.langchain.com/oss/python/deepagents/quickstart
+GitHub: https://github.com/langchain-ai/deepagents
+CLI Docs: https://docs.langchain.com/oss/python/deepagents/cli/overview
+発表ブログ（2025/7）：https://blog.langchain.com/deep-agents/
+v0.5ブログ（最新）：https://blog.langchain.com/deep-agents-v0-5/
+
+何か特定部分（例：サンドボックス実装例、Local LLM設定の詳細、ベンチマークなど）を深掘りしてほしい場合は教えてください！一緒にZenn記事を最高のものにしましょう！

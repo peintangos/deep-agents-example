@@ -1,0 +1,202 @@
+# LangChain Deep Agents 調査レポート
+
+**Author:** Manus AI  
+**Date:** 2026-04-12
+
+## 概要
+
+LangChain の **Deep Agents** は、単なる「エージェントを作るための薄い SDK」ではなく、**計画・文脈管理・仮想ファイルシステム・サブエージェント・メモリ・スキル・サンドボックス・承認フロー・デプロイ導線** までを一体で扱う **agent harness** として位置づけられている[1] [2]。2026年4月時点では、CLI、非同期サブエージェント、マルチモーダルなファイル処理、Deploy 機能まで整備されつつあり、Deep Agents は「研究用の実験ライブラリ」から「運用可能なオープンなエージェント基盤」へと急速に進化している[5] [6] [7]。
+
+Zenn 記事向けに最初に結論を言うと、Deep Agents の面白さは **賢いプロンプトを1本書けば何とかなる** という発想ではなく、**長いタスクを壊れにくくするための“文脈設計”と“実行環境設計”を標準化していること** にある。とくに、**skills による progressive disclosure、subagents による context isolation、memory と filesystem の分離、sandbox の組み込み、deploy 時の memory ownership の思想** は、他のエージェント SDK と比較しても際立つ論点である[1] [4] [6] [10]。
+
+## まず押さえるべき位置づけ
+
+Deep Agents を理解するうえで重要なのは、LangChain / LangGraph / Deep Agents を同列の競合として見るのではなく、**抽象度の異なるレイヤー** として捉えることだ。公式比較ページでは、Deep Agents は LangChain / LangGraph の上にある「すぐ使える agent harness」として紹介されており、OpenSWE や LangSmith Fleet のようなプロダクトでも利用されていると明記されている[4]。
+
+| 観点 | LangChain / LangGraph | Deep Agents |
+| --- | --- | --- |
+| 主な役割 | エージェントやワークフローを自由に構築する基盤 | 実践的な agent harness を素早く使うための上位レイヤー |
+| 設計自由度 | 高い | 高いが、標準パターンがかなり用意されている |
+| 最初の学習対象 | フレームワークやグラフ設計 | コンテキスト設計・skills・subagents・memory |
+| 向いている人 | 独自設計を深くやりたい人 | まず動く強力なエージェントを作り、その後必要に応じて掘りたい人 |
+
+この意味で Deep Agents は「LangChain の新しいエージェント API」というより、**LangGraph 的な実行モデルを、汎用エージェント用途へ最適化して束ねた実装ハーネス** と表現したほうが実態に近い[1] [4]。
+
+## Deep Agents は何ができるのか
+
+公式ドキュメントとブログ、CLI ドキュメント、比較ページを総合すると、Deep Agents の能力はかなり広い[1] [4] [7]。とくに目立つのは、単一のツール呼び出しループに留まらず、**長期タスクで破綻しやすい箇所** に対して明示的な仕組みが用意されていることだ。
+
+| 能力 | 内容 | 何が嬉しいか |
+| --- | --- | --- |
+| 計画と TODO 管理 | 複雑な作業を段階化して追跡する[4] [7] | 長いタスクでも見通しを失いにくい |
+| ファイル操作 | 読み書き・編集・glob/grep を内蔵する[4] [7] | コーディングやドキュメント作業と相性がよい |
+| シェル実行 | テスト・ビルド・依存管理・コマンド実行が可能[4] [7] | 実際の開発作業まで接続しやすい |
+| 仮想ファイルシステム | 状態・ファイル・永続化をバックエンドで切り替えられる[1] [4] | エージェントの「作業領域」を設計しやすい |
+| メモリ | セッションをまたいだ文脈保持やメモリストアが可能[4] [8] | 継続的なエージェント体験を作りやすい |
+| Skills | 能力や手順を SKILL.md 単位で再利用できる[10] | 長い手順やドメイン知識を後出しで読ませられる |
+| Subagents | 文脈を分離した専門エージェントへ委譲できる[1] [11] | context bloat を抑えながら探索できる |
+| Async subagents | バックグラウンド実行・途中更新・キャンセルができる[5] [9] | Deep Research 的な長時間タスクに向く |
+| Sandboxes | 隔離環境でコードや操作を実行できる[1] [6] [8] | 安全性と再現性を高めやすい |
+| Human-in-the-loop | 承認・編集・拒否などを組み込める[4] [8] | 危険操作を人が止められる |
+| CLI | すぐ触れる入口としてのターミナル UX がある[7] | 導入障壁が低い |
+| Deploy | 本番運用向け配備を一本化する導線がある[6] [8] | 試作から運用への遷移がしやすい |
+
+Deep Agents の特徴は、これらがバラバラの機能ではなく、**長時間・多段・状態付きタスクのための一つの設計思想** に沿っていることだ。たとえば skills はコンテキスト節約のため、subagents は文脈隔離のため、memory は継続性のため、sandboxes は安全な実行のため、deploy はその運用化のためにある[1] [6] [8] [10] [11]。
+
+## なぜ今 Deep Agents が注目されるのか
+
+2025年後半から2026年春にかけての公開情報を見ると、Deep Agents は段階的に機能拡張されている。初期の「agent harness」像から、2026年には **CLI、マルチエージェント設計、async subagents、Deploy** まで話題が広がっており、LangChain 側も明確に“本番で使うエージェント基盤”として育てていることがわかる[2] [5] [6] [7] [11]。
+
+| 時期 | 主要な公開情報 | 読み取れる方向性 |
+| --- | --- | --- |
+| 2025-07 | Deep Agents 紹介ブログ公開[2] | harness engineering と context engineering を前面に出し始める |
+| 2025-11 | Skills 活用ブログ公開[3] | ツール列挙よりも skill による能力注入を重視 |
+| 2026-01 | Multi-Agent Applications 記事公開[11] | subagents / skills を中核プリミティブとして整理 |
+| 2026-03 | Claude Agent SDK / Codex SDK との比較ページ整備[4] | 競合 SDK に対する差別化が明確化 |
+| 2026-04-07 | v0.5 公開[5] | async subagents とマルチモーダル対応でユースケース拡大 |
+| 2026-04-09 | Deep Agents Deploy ベータ公開[6] | 本番配備と memory ownership を強く打ち出す |
+
+この流れから見えてくるのは、Deep Agents の最新トレンドが **「単一エージェントの性能」より「長いタスクをどう分担し、どう状態を持ち、どう運用するか」へ移っている** ということだ。つまり、読者向けの記事でも「どのモデルが賢いか」より、**どのように文脈を壊さず長時間タスクを扱うか** を主軸に据えたほうが、Deep Agents の本質に近づける。
+
+## Deep Agents のキーワードは agent harness である
+
+公式ブログでは Deep Agents を **agent harness** と呼んでいる[2]。これは重要な表現で、Deep Agents はモデルそのものでも、単独のフレームワークでもなく、**モデル・ツール・メモリ・コンテキスト・スキル・実行環境・承認フローを束ねる“枠組み”** を指している。
+
+> “Deep Agents deploy is built for an open world. It’s built on Deep Agents — an open source, model agnostic agent harness.” — LangChain Blog, *Deep Agents Deploy: an open alternative to Claude Managed Agents*[6]
+
+この「harness」という言い方は、Zenn 記事でもかなり有効である。多くの読者はエージェントを「LLM + tools」くらいで捉えがちだが、Deep Agents の議論はそこから一歩進んでおり、**長期記憶、仮想ファイル、権限、サンドボックス、複数エージェント、運用導線** を含めた全体設計を扱っている。だからこそ、記事タイトルや導入でも「Deep Agents はエージェント SDK というより、運用可能な agent harness である」という視点を置くと、他の記事と差別化しやすい。
+
+## Skills は「追加ツール」ではなく能力パッケージである
+
+Skills は Deep Agents を理解するうえで特に重要だ。公式ドキュメントでは、各スキルはディレクトリ単位で管理され、`SKILL.md` を中心に、スクリプトや追加ドキュメント、テンプレートなどを同梱できると説明されている[10]。そしてエージェントは最初から全文を読むのではなく、**必要そうなスキルだけを追加で読む progressive disclosure** を採用する[10]。
+
+| 観点 | AGENTS.md / Memory | Skills |
+| --- | --- | --- |
+| 主な役割 | 状態や継続文脈の保持[6] [8] [10] | 能力・手順・専門知識の注入[3] [10] |
+| 読み込まれ方 | 継続的な文脈として扱われる | 必要時に詳細を読む progressive disclosure |
+| 向いている内容 | ユーザー固有情報、継続中の前提、長期記憶 | 手順書、ドメイン知識、テンプレート、再利用ワークフロー |
+| 記事での説明軸 | 「覚えるもの」 | 「できるようにするもの」 |
+
+これは Zenn 記事で非常に説明しがいがある。多くの読者は「プロンプトを長く書けばよい」と考えがちだが、Deep Agents はそこを **memory と skills に分離** し、「状態」と「能力」を別々に扱う設計にしている[3] [10]。この整理は、エージェント設計の考え方そのものを変えるポイントだ。
+
+## Subagents の本質は役割分担ではなく context isolation である
+
+公式ブログのマルチエージェント記事では、subagents の価値を **context bloat の回避** に置いている[11]。つまり、メインエージェントが探索の途中結果を大量に抱え込むと文脈が汚れ、性能が落ちやすい。そこでサブエージェントに探索を委譲し、最終要約だけを返してもらうことで、主エージェントのコンテキストをきれいに保つ。
+
+> “Subagents tackle a fundamental problem in agent engineering: context bloat.” — LangChain Blog, *Building Multi-Agent Applications with Deep Agents*[11]
+
+この観点は非常に重要で、subagents を「複数の役割を持つ AI チーム」とだけ説明すると、本質を取り逃がしやすい。Deep Agents 文脈では、subagents は **探索の隔離装置** であり、必要なら general-purpose subagent を使って「同じ能力の別コンテキスト」を切り出すだけでも価値がある[11]。Zenn 記事では、「専門家チームごっこ」よりも、**コンテキストを汚さないための工夫** として紹介したほうが、実装者に刺さりやすい。
+
+## Async subagents は Deep Research 的ワークロードに直結する
+
+v0.5 で追加された async subagents は、Deep Agents の進化を象徴する機能である[5]。通常の subagents は同期的に実行されるが、async subagents は **起動後すぐ制御を返し、バックグラウンドで継続実行** できる[5] [9]。さらに supervisor は、進行状況確認、追加入力、キャンセルまで行える[9]。
+
+| 操作 | 役割 | 実務的な意味 |
+| --- | --- | --- |
+| launch | タスクを起動して task ID を返す[9] | 長時間処理を裏で走らせられる |
+| check | 状態や結果を問い合わせる[9] | 非同期ジョブの監視に近い |
+| update | 同一タスクに追加指示を与える[9] | 調査途中で方針転換できる |
+| cancel | タスクを中断する[9] | 無駄な実行を止められる |
+| list | 全タスクの状態を一覧する[9] | supervisor 側で複数ジョブを管理できる |
+
+特に興味深いのは、非同期タスクのメタデータが通常の会話履歴とは別の **専用状態チャネル** に保存される点である[9]。これは Deep Agents が、会話圧縮やコンテキスト節約の副作用まで考慮していることを示す。Zenn 記事では、この設計を紹介することで「Deep Agents は単に便利 API を足しただけではない」と印象づけられる。
+
+## CLI があることは記事化において大きな強み
+
+Deep Agents CLI は、SDK ベースの仕組みをそのまま一般ユーザーが試せる入口になっている[7]。ドキュメントによれば、CLI にはファイル操作、シェル実行、計画管理、永続メモリ、コンテキスト圧縮、MCP、skills、承認フローなどが組み込まれている[7]。つまり、読者は最初からアプリを組まなくても、**「Deep Agents 的な体験とは何か」** を terminal 上で掴める。
+
+Zenn 記事では、Deep Agents の紹介をいきなり SDK コードから始めるより、**CLI で体験したことを起点に、なぜそう動くのかを SDK と設計思想へ降りていく** 構成がかなり有効だろう。これにより、単なる API 説明記事ではなく、「触ってみたら何が違ったのか」を語る実践記事になる。
+
+## Deploy と memory ownership は今後の差別化軸になりそう
+
+2026年4月の Deep Agents Deploy 発表で特に強調されているのは、**memory ownership** の思想である[6]。ブログでは、エージェントの本当のロックインはモデルではなく、ハーネスと一体化したメモリにあると論じている[6]。これはかなり強いメッセージで、単なるデプロイの便利機能紹介に留まらない。
+
+比較ページでも、Deep Agents は **長期メモリ、仮想ファイルシステム、sandbox-as-tool、deploy 導線、LangSmith 観測性** を特徴として前面に出している[4]。Claude Agent SDK や Codex SDK との比較では、モデル非依存性や長期メモリ、柔軟なデプロイ構成が差別化点とされる[4]。
+
+| 比較観点 | Deep Agents | Claude Agent SDK | Codex SDK |
+| --- | --- | --- | --- |
+| モデル | 幅広いモデルに対応[4] | Claude 系中心[4] | OpenAI 系中心[4] |
+| 長期メモリ | あり[4] | なし[4] | なし[4] |
+| 仮想ファイルシステム | あり[4] | なし[4] | なし[4] |
+| sandboxes as tools | あり[4] | なし[4] | なし[4] |
+| 本番配備導線 | あり[4] [6] [8] | 自前構築寄り[4] | 限定的[4] |
+| 観測性 | LangSmith[4] [7] | 公式比較上は限定的[4] | OpenAI Traces[4] |
+
+ここは Zenn 記事の差別化ポイントとしてかなり有望である。多くの記事は「何ができるか」に寄りがちだが、Deep Agents では **“記憶を誰が持つか” と “どこに実行基盤を置くか”** まで踏み込んで語れるため、より中長期のアーキテクチャ論へ展開しやすい。
+
+## 本番運用の観点では何を見るべきか
+
+Going to production ガイドは、Deep Agents を真面目に導入する読者にとって非常に重要である[8]。ここでは thread / user / assistant のスコープ設計、認証、multi-tenancy、end-user credentials、durability、memory scoping、sandbox lifecycle、file transfer、secrets management、guardrails、rate limiting、PII 対策、observability まで整理されている[8]。
+
+この内容からわかるのは、Deep Agents が「なんでもできるエージェント」の夢を語るだけでなく、**どの単位で情報を分離し、どこで認可し、どこに記憶を置き、どの実行環境で動かすか** という現実的な運用論まで射程に入れているということだ[6] [8]。逆に言えば、読者に対しては「簡単に始められるが、運用は簡単ではない」と正直に書くべきである。
+
+## コミュニティの関心から見える“次の沼”
+
+LangChain Forum の Deep Agents カテゴリを見ると、最近の議論は CLI での subagent 定義、router pattern、sandbox のファイル上書き、middleware の差し替え、レイテンシ、human-in-the-loop の組み込み、custom subagent graph など、かなり実装寄りのテーマに移っている[12]。これは Deep Agents がすでに「触ってみた」フェーズを越え、**どう組み込むか・どう詰まるか** の段階へ入っていることを示している。
+
+そのため Zenn 記事では、単に機能一覧を並べるよりも、**どこで概念が難しくなるのか** を先回りして整理するのが有効だ。具体的には、`AGENTS.md` と `SKILL.md` の違い、subagents と async subagents の違い、メモリとファイルシステムの違い、ローカル試作と本番運用の差、CLI と SDK の役割差、といった論点が重要になる。
+
+## Zenn 記事としておすすめの切り口
+
+ここまでの調査を踏まえると、Zenn 記事の切り口は複数考えられる。ただし最も強いのは、Deep Agents を「また新しいエージェント SDK が出た」という文脈ではなく、**文脈工学と運用工学を前提にした agent harness** として捉える書き方である。
+
+| 記事の切り口 | 向いている読者 | 強み |
+| --- | --- | --- |
+| Deep Agents とは何かを俯瞰する総説 | これから触る人 | 入口として広く読まれやすい |
+| CLI から始める実践入門 | 実際に試したい人 | 再現しやすく記事価値が高い |
+| Skills / Subagents / Memory を分解する設計論 | エージェント設計に興味がある人 | 他記事との差別化がしやすい |
+| Claude Agent SDK / Codex SDK との比較 | すでに他 SDK を知っている人 | 検索流入・比較需要に強い |
+| Deploy と memory ownership の考察 | プロダクト化を考える人 | 中上級者向けの独自性が高い |
+
+個人的には、**「LangChain Deep Agents を触って見えた、agent harness 時代の設計論」** のような方向性が最も伸びしろがあると考える。機能列挙ではなく、skills・subagents・memory・deploy を **“長いタスクを壊さず運用するための部品”** として説明すると、記事全体が一段深くなる。
+
+## そのまま使える記事構成案
+
+以下の構成なら、入門読者にも中級者にも届きやすい。
+
+| セクション | ねらい | 書くべき内容 |
+| --- | --- | --- |
+| 導入 | なぜ今 Deep Agents なのか | 2026年春の更新、CLI / async / deploy の流れ[5] [6] [7] |
+| Deep Agents の正体 | 単なる SDK ではないことを示す | agent harness、LangChain / LangGraph との位置づけ[1] [2] [4] |
+| 何ができるか | 機能の全体像を見せる | files, shell, memory, skills, subagents, sandboxes, HITL[4] [7] [8] |
+| 面白い設計ポイント | 読みどころを作る | progressive disclosure、context isolation、async tasks[5] [9] [10] [11] |
+| 他 SDK との比較 | 読者の意思決定を助ける | Claude Agent SDK / Codex SDK 比較[4] |
+| 実際に試す順番 | 読者行動に繋げる | CLI → skills → subagents → production |
+| まとめ | Deep Agents の本質を再定義 | 文脈と運用を設計するための harness |
+
+## そのまま流用できる導入文のたたき台
+
+2026年春の LangChain 界隈では、Deep Agents がかなり面白い位置に来ています。最初は「強めのエージェント SDK」くらいに見えていたのですが、公式ドキュメントやブログ、最近の v0.5 / Deploy 周りの更新を追っていくと、実態はもう少し大きいです。Deep Agents は、モデルにツールを渡して動かすだけの仕組みではなく、skills、subagents、memory、filesystem、sandbox、human-in-the-loop、そして deploy まで含めた **agent harness** として設計されています[1] [2] [5] [6]。この記事では、Deep Agents がそもそも何者なのか、何ができるのか、そしてなぜ今注目に値するのかを、機能紹介だけでなく設計思想の観点から整理します。
+
+## 実際に試すなら何をやるべきか
+
+調査ベースで言えば、Deep Agents を試す順番はかなり重要である。最初から本番運用や async subagents に飛び込むと、概念の多さで混乱しやすい。まずは CLI で体験を掴み、その後 skills で能力注入の考え方を理解し、次に subagents で context isolation を試し、最後に production / deploy / memory ownership を読むのが自然だ[6] [7] [8] [10] [11]。
+
+| 段階 | 触るもの | 見るべきポイント |
+| --- | --- | --- |
+| 1 | CLI[7] | 何が標準機能として入っているか |
+| 2 | Skills[10] | 手順や知識をどう後出しで読ませるか |
+| 3 | Subagents[11] | 文脈隔離がどの程度効くか |
+| 4 | Async subagents[5] [9] | 長時間タスクの扱いがどう変わるか |
+| 5 | Going to production / Deploy[6] [8] | 記憶、権限、実行環境、配備をどう考えるか |
+
+## 総括
+
+Deep Agents を一言でまとめるなら、**「長いタスクを壊さず扱うための設計を、かなり実用的な粒度でパッケージしたオープンな agent harness」** である[1] [2] [4]。注目すべきなのは、単にツールが多いことではない。skills で能力を遅延読込し、subagents で文脈を隔離し、async subagents で長時間タスクを制御し、memory と filesystem で状態を扱い、sandboxes と HITL で危険操作を制御し、deploy で本番運用へ接続するという、**一貫したシステム設計** が見えている点である[5] [6] [8] [9] [10] [11]。
+
+Zenn で記事にするなら、Deep Agents を「新しい SDK」として紹介するだけではもったいない。むしろ、**“エージェントはモデルの賢さだけではなく、文脈・状態・実行環境・記憶の設計で決まる” ことを体感できる題材** として扱うと、読み応えのある記事になるはずだ。
+
+## References
+
+[1]: https://docs.langchain.com/oss/python/deepagents/overview "Deep Agents overview - Docs by LangChain"
+[2]: https://blog.langchain.com/deep-agents/ "Deep Agents - LangChain Blog"
+[3]: https://blog.langchain.com/using-skills-with-deep-agents/ "Using skills with Deep Agents - LangChain Blog"
+[4]: https://docs.langchain.com/oss/python/deepagents/comparison "Comparison with Claude Agent SDK and Codex - Docs by LangChain"
+[5]: https://blog.langchain.com/deep-agents-v0-5/ "Deep Agents v0.5 - LangChain Blog"
+[6]: https://blog.langchain.com/deep-agents-deploy-an-open-alternative-to-claude-managed-agents/ "Deep Agents Deploy: an open alternative to Claude Managed Agents - LangChain Blog"
+[7]: https://docs.langchain.com/oss/python/deepagents/cli/overview "Deep Agents CLI - Docs by LangChain"
+[8]: https://docs.langchain.com/oss/python/deepagents/going-to-production "Going to production - Docs by LangChain"
+[9]: https://docs.langchain.com/oss/python/deepagents/async-subagents "Async subagents - Docs by LangChain"
+[10]: https://docs.langchain.com/oss/python/deepagents/skills "Skills - Docs by LangChain"
+[11]: https://blog.langchain.com/building-multi-agent-applications-with-deep-agents/ "Building Multi-Agent Applications with Deep Agents - LangChain Blog"
+[12]: https://forum.langchain.com/c/oss-product-help-lc-and-lg/deep-agents/18 "Latest OSS Product Help/Deep Agents topics - LangChain Forum"
