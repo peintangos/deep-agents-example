@@ -1,6 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { createDeepAgent } from "deepagents";
+import { createLicenseAnalyzerSubAgent } from "./subagents/license-analyzer";
 
 /**
  * OpenRouter 経由で利用するモデル名。
@@ -42,5 +43,6 @@ export function createAuditAgent() {
   return createDeepAgent({
     model: createLlm(),
     systemPrompt: AUDIT_SYSTEM_PROMPT,
+    subagents: [createLicenseAnalyzerSubAgent()],
   });
 }

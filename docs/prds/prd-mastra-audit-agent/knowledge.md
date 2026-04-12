@@ -4,6 +4,57 @@
 
 <!-- Document patterns that should be reused in later tasks or later PRDs. -->
 
+### deepagents SubAgent の型契約と filesystemMiddleware の自動付与
+
+deepagents v1.9 の `SubAgent` interface は以下が**必須**:
+
+- `name: string`
+- `description: string`
+- `systemPrompt: string`
+
+**任意**:
+
+- `tools?: StructuredTool[]` — 未指定の場合、deepagents の `defaultTools` が使われる
+- `model?: LanguageModelLike | string` — 省略時はメインエージェントの model を継承
+- `middleware?` / `skills?` / `interruptOn?` / `responseFormat?`
+
+型で注意すべきこと:
+- `SubAgent.tools` は **`StructuredTool`** (concrete abstract class) を要求する。`StructuredToolInterface` では TS2322 エラーになる
+- `tool()` ヘルパが返す `DynamicStructuredTool` は `StructuredTool` を継承しているので、そのまま渡せる
+
+**filesystemMiddleware の自動付与**: サブエージェントには `createDeepAgent` が自動で default middleware stack (`todoListMiddleware` / `filesystemMiddleware` / `summarizationMiddleware` 等) を適用する。そのため **`read_file` / `write_file` / `edit_file` はサブエージェント側に tools を明示しなくても使える**。カスタムツール (`fetch_github` 等) だけを `tools` に入れれば十分。
+
+ただし **skills と違って default tools は main agent から継承しない** 点に注意。サブエージェントが main agent と同じ user-defined tool を使いたければ、同じ tool 参照を両方に渡す必要がある。
+
+### サブエージェント factory パターン (license-analyzer がリファレンス)
+
+共通の DI パターン:
+
+\`\`\`ts
+export interface XxxOptions {
+  readonly tools?: readonly StructuredTool[];
+}
+
+export function createXxxSubAgent(options: XxxOptions = {}): SubAgent {
+  const tools = [...(options.tools ?? [createDefaultTool()])];
+  const outputPath = rawPath("<aspect>", "result.json");
+  return {
+    name: "xxx-analyzer",
+    description: "...",
+    systemPrompt: \`... ミッション / 出力フォーマット / 利用可能ツール / 原則 ...\`,
+    tools: tools as StructuredTool[],
+  };
+}
+\`\`\`
+
+system_prompt には必ず次の 4 セクションを入れる:
+1. ミッション (番号付きリスト)
+2. 出力フォーマット (JSON Schema 風)
+3. 利用可能ツール (ツール名 + 用途)
+4. 原則 ("ファクト重視" / "不明点は unknown" / "推測禁止")
+
+これでサブエージェント 5 本を量産するときの迷いが最小になる。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。

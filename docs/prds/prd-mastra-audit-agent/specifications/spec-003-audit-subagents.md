@@ -38,9 +38,10 @@ Feature: 5 つの監査サブエージェントが独立して動作する
 
 ## Implementation Steps
 
-- [ ] `src/subagents/` 配下に 5 つのサブエージェント定義ファイルを作成
-- [ ] 各サブエージェントの system_prompt を監査観点ごとにチューニング
-- [ ] 必要最小限のツールを各サブエージェントに割り当てる（GitHub API / OSV API / fs ツール）
-- [ ] `src/agent.ts` でメインエージェントにサブエージェント群を登録
-- [ ] 各サブエージェント単体のテスト（モック環境で最低限のフロー確認）
+- [x] `src/subagents/license-analyzer.ts` を実装しサブエージェント factory パターンを確立 (残り 4 観点は同じパターンで量産)
+- [ ] `security-auditor` / `maintenance-health` / `api-stability` / `community-adoption` の 4 サブエージェントを追加
+- [x] 各サブエージェントの system_prompt を監査観点ごとにチューニング (license-analyzer 完了、残り 4 件は次タスク)
+- [x] 必要最小限のツールを各サブエージェントに割り当てる設計 (`LicenseAnalyzerOptions.tools` で DI 可能)
+- [x] `src/agent.ts` でメインエージェントにサブエージェント群を登録 (license-analyzer のみ登録済み、残りは追加時に同じ要領)
+- [x] 各サブエージェント単体のテスト (license-analyzer 5 ケース)
 - [ ] Review (typecheck + test + `/code-review`)
