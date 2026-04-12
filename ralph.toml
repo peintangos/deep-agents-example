@@ -3,6 +3,6 @@
 
 test_primary = "npm test"
 test_integration = "N/A"
-build_check = "N/A"
+build_check = "npm run typecheck"
 lint_check = "N/A"
 format_fix = "N/A"
