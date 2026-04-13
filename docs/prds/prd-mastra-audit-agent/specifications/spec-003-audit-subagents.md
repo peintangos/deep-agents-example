@@ -38,10 +38,10 @@ Feature: 5 つの監査サブエージェントが独立して動作する
 
 ## Implementation Steps
 
-- [x] `src/subagents/license-analyzer.ts` を実装しサブエージェント factory パターンを確立 (残り 4 観点は同じパターンで量産)
-- [ ] `security-auditor` / `maintenance-health` / `api-stability` / `community-adoption` の 4 サブエージェントを追加
-- [x] 各サブエージェントの system_prompt を監査観点ごとにチューニング (license-analyzer 完了、残り 4 件は次タスク)
-- [x] 必要最小限のツールを各サブエージェントに割り当てる設計 (`LicenseAnalyzerOptions.tools` で DI 可能)
-- [x] `src/agent.ts` でメインエージェントにサブエージェント群を登録 (license-analyzer のみ登録済み、残りは追加時に同じ要領)
-- [x] 各サブエージェント単体のテスト (license-analyzer 5 ケース)
-- [ ] Review (typecheck + test + `/code-review`)
+- [x] `src/subagents/license-analyzer.ts` を実装しサブエージェント factory パターンを確立
+- [x] `security-auditor` / `maintenance-health` / `api-stability` / `community-adoption` の 4 サブエージェントを追加
+- [x] 各サブエージェントの system_prompt を監査観点ごとにチューニング (5 観点すべて完了)
+- [x] 必要最小限のツールを各サブエージェントに割り当てる設計 (5 factory すべて DI 可能)
+- [x] `src/agent.ts` でメインエージェントに 5 サブエージェント全員を登録
+- [x] 各サブエージェント単体のテスト (5 観点 × 5 ケース = 25 tests)
+- [x] Review (typecheck + 65 tests pass + api-stability の system_prompt に "SemVer" を追加する修正を経て完了)
