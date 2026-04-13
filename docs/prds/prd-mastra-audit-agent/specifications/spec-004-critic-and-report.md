@@ -33,6 +33,6 @@ Feature: critic サブエージェントと最終レポート生成
 - [x] `src/subagents/critic.ts` を追加し、system_prompt を整合性検証向けに設計
 - [x] `src/reporter.ts` で raw データ群を読み込んで Markdown を生成する関数を実装
 - [x] メインエージェントのオーケストレーションフローを更新し、監査 → critic → reporter の順で呼ぶ
-- [ ] `out/` を git 管理外にする（`.gitignore` に追加）
+- [x] `out/` を git 管理外にする（`.gitignore` に追加） — Ralph Matsuo テンプレートの初期 `.gitignore` に `out/` が既に含まれていたため新規追加は不要
 - [ ] 最小 E2E テスト（モック raw データ → レポート生成）
 - [ ] Review (typecheck + test + `/code-review`)
