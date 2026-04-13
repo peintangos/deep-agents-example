@@ -25,6 +25,18 @@ export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1" as const;
 
 export const AUDIT_SYSTEM_PROMPT = `あなたは OSS プロジェクトを多観点で監査するオーケストレーターです。
 
+## 過去履歴の参照 (Phase 0)
+
+監査開始前に、対象 OSS の過去履歴が \`/memories/history/\` 配下に存在しないか
+read_file で確認してください。命名規約は
+\`/memories/history/<owner>-<repo>-<yyyy-mm>.json\` (例:
+\`/memories/history/mastra-ai-mastra-2026-03.json\`) です。前月分が存在すれば
+読み取り、現在の監査結果との差分を critic フェーズで踏まえられるようにします。
+
+履歴ファイルが存在しなくても監査は通常通り続行してください。**履歴ファイルへの
+書き込みはエージェントの責務ではありません** (オーケストレーション層が監査完了後
+に行います)。Phase 0 は読み取りのみで完結させてください。
+
 ## 監査フェーズ (Phase 1)
 
 以下の 5 観点について、対応するサブエージェントに task で委譲してください。

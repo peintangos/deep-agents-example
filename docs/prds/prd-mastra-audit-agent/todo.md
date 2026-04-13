@@ -22,6 +22,6 @@ Mark completed tasks with `- [x]` instead of removing them.
 - [x] spec-004: モック raw データを使った最小 E2E テスト (reporter が 5 観点セクションと findings セクションを含む Markdown を生成する) を書く
 - [x] spec-005: `createDeepAgent()` に `store` と `backend`(`/memories/` → `StoreBackend`) を配線し、`createAuditAgent({ store })` で注入可能にする (v1.9 の API に合わせて spec の `use_longterm_memory: true` はドロップ)
 - [x] spec-005: `src/memory/policy.ts` で監査ポリシー (`/memories/audit-policy.json`) の読み書きヘルパーを実装する
-- [ ] spec-005: ユーザー好み (レポート文体 / 優先観点) を `/memories/user-preferences.json` に記録 / 復元するヘルパーを実装する
-- [ ] spec-005: 過去の監査履歴を `/memories/history/<target>-<yyyy-mm>.json` に保存するヘルパーと AUDIT_SYSTEM_PROMPT への履歴参照指示を追加する
-- [ ] spec-005: 同一 store を共有した 2 回の createAuditAgent 呼び出しで `/memories/` のデータが維持されることを検証する統合テストを書く
+- [x] spec-005: ユーザー好み (レポート文体 / 優先観点) を `/memories/user-preferences.json` に記録 / 復元するヘルパーを実装する
+- [x] spec-005: 過去の監査履歴を `/memories/history/<target>-<yyyy-mm>.json` に保存するヘルパーと AUDIT_SYSTEM_PROMPT への履歴参照指示を追加する
+- [x] spec-005: 同一 store を共有した 2 回の createAuditAgent 呼び出しで `/memories/` のデータが維持されることを検証する統合テストを書く

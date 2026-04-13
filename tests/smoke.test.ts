@@ -83,6 +83,28 @@ describe("AUDIT_SYSTEM_PROMPT orchestration structure", () => {
   it("documents the fact-only principle", () => {
     expect(AUDIT_SYSTEM_PROMPT).toMatch(/ファクト|推測/);
   });
+
+  it("instructs the agent to consult prior history at /memories/history/<owner>-<repo>-<yyyy-mm>.json", () => {
+    expect(AUDIT_SYSTEM_PROMPT).toMatch(/Phase 0/);
+    expect(AUDIT_SYSTEM_PROMPT).toContain(
+      "/memories/history/<owner>-<repo>-<yyyy-mm>.json",
+    );
+  });
+
+  it("tells the agent to continue the audit even when no prior history exists", () => {
+    expect(AUDIT_SYSTEM_PROMPT).toMatch(/履歴.*存在しなくても.*続行/s);
+  });
+
+  it("declares that history file writes are NOT the agent's responsibility (orchestrator owns it)", () => {
+    expect(AUDIT_SYSTEM_PROMPT).toMatch(/書き込み.*エージェントの責務ではありません/s);
+  });
+
+  it("orders Phase 0 before Phase 1 so prior history is consulted first", () => {
+    const phase0Idx = AUDIT_SYSTEM_PROMPT.indexOf("Phase 0");
+    const phase1Idx = AUDIT_SYSTEM_PROMPT.indexOf("Phase 1");
+    expect(phase0Idx).toBeGreaterThan(-1);
+    expect(phase1Idx).toBeGreaterThan(phase0Idx);
+  });
 });
 
 describe("createAuditAgent store injection (spec-005)", () => {

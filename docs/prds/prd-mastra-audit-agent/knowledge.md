@@ -178,6 +178,59 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### `CompositeBackend` の prefix 配線を LLM なしで決定論的にテストする (legacy mode)
+
+spec-005 で `/memories/` → `StoreBackend` の prefix ルーティングが本当に効いているかを検証したいが、`createAuditAgent({ store }).invoke(...)` は LLM 呼び出しを伴うので決定論的ではない。**`StoreBackend` / `StateBackend` の legacy mode** を使うと、LangGraph 実行コンテキスト (`getStore()`) なしでもテストから同じ配線を組める。
+
+\`\`\`ts
+import { CompositeBackend, StateBackend, StoreBackend } from "deepagents";
+import { InMemoryStore } from "@langchain/langgraph-checkpoint";
+
+const sharedStore = new InMemoryStore();
+const stateAndStore = { state: {}, store: sharedStore };
+const composite = new CompositeBackend(new StateBackend(stateAndStore), {
+  "/memories/": new StoreBackend(stateAndStore),
+});
+
+await composite.read("/memories/audit-policy.json");  // ← 実コードと同じ経路
+\`\`\`
+
+ポイント:
+
+1. **legacy mode の判定は `"state" in obj`**: `node_modules/deepagents/dist/index.js` line 4227-4238 / line 557-565 で確認できる通り、constructor は引数オブジェクトに `state` キーがあれば legacy mode と判定する。`state` の値自体は `StoreBackend` の中では **参照されない** (`getStore()` と `getNamespace()` だけが `stateAndStore` を読む) ため、空オブジェクト `{}` で十分
+2. **helper の規約 ↔ deepagents の prefix 剥がし** が一致していることを直接実走させられる: helper で `store.put(["filesystem"], "/audit-policy.json", ...)` した値を `composite.read("/memories/audit-policy.json")` で読み戻せれば、namespace + key + FileData v2 形状のすべてが正しいことになる
+3. **/memories/ 以外のパスは触らない**: default の StateBackend は zero-arg だと state-tracking が動かないが、テストで `/memories/...` 以外を読み書きしなければ問題ない (CompositeBackend は prefix にマッチしたパスだけを StoreBackend に流すので)
+
+この「LLM 不要 + 配線証跡」テストパターンは、spec-006 (HITL) / spec-007 (Skills) / spec-008 (Middleware) でも応用可能。エージェントの非決定性を排除しつつ、**プロダクションコードと同じ実行経路** で配線を縛れるのが利点。
+
+### 長期メモリレイヤを「型・パス・薄いラッパ」に分離する 3 ファイル構成
+
+`policy.ts` / `preferences.ts` / `history.ts` の 3 ファイルはすべて以下の同型構造で書いている:
+
+1. **下回りは `store-helpers.ts` の `readMemoryJson` / `writeMemoryJson`** に統一
+2. 各ファイルは: ドメイン型 + canonical path 定数 + 薄い read/write ラッパ
+3. 正規化が必要な場合 (`preferences.ts` の `normalizePriorityAspects` / `history.ts` の `slugifyAuditTarget`) はドメイン側に閉じる
+
+このパターンの恩恵:
+
+- **規約変更 (namespace, prefix, FileData 形状) は 1 ファイル** (`store-helpers.ts`) に局所化される
+- 各ドメインのテストは「正規化と round-trip」だけに集中でき、prefix 剥がし規約のテストは `policy.test.ts` 1 箇所に集約 (preferences/history 側で再検証しない)
+- 後で永続 BaseStore (SQLite 等) に差し替えるときも `store-helpers.ts` の `created_at` get→put race を直すだけで 3 ファイル分が片付く
+
+**responsibility 境界の指針**: 「persist する責務」と「いつ persist するか決める責務」を分ける。helper は前者だけを担い、後者 (HITL での対話収集 / 監査完了後の history 書き込み) は後続 spec のオーケストレーション層に委ねる。spec-005 で helper を作ったときに **CLI から呼び出していない** ことに対するレビュー指摘があったが、これは**意図的なスコープ分離**で、helper を作っただけでは production パスから到達しなくて当然。spec の Implementation Steps が「ヘルパーを実装」と書いているなら helper まで、「フローを実装」と書いていれば呼び出し側まで作る、と粒度を読み替えるのが筋。
+
+### Phase 番号付きプロンプトに段階を後から差し込むときの互換ルール
+
+`AUDIT_SYSTEM_PROMPT` は spec-004 で「Phase 1 (監査) / Phase 2 (検証)」の 2 フェーズ構成にしたが、spec-005 で履歴参照を入れるために **Phase 0** を追加した。既存の smoke test が `indexOf("Phase 1") < indexOf("Phase 2")` を assert していたが、Phase 0 を Phase 1 の **前** に追加してもこの不等号は壊れず、互換性を保てた。
+
+汎用ルール:
+
+- **既存の段階名 (`Phase 1`, `Phase 2`...) は変えない**
+- **追加段階は番号を飛ばさず、前後関係を indexOf 比較で固定**
+- 新しく追加した段階の挙動 (履歴の存在を許容 / 書き込みは禁止 / 順序) はそれぞれ独立した assertion で固定する。1 つに詰め込むと将来の prompt 編集で壊れたときの原因切り分けが困難になる
+
+`tests/smoke.test.ts` の Phase 0 アサーション 4 本 (Phase 番号 / 履歴 path / 「履歴が無くても続行」/「書き込みはエージェントの責務ではない」) はこの方針の実例。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。

@@ -45,7 +45,7 @@ Feature: 長期メモリがセッションをまたいで保持される
 
 - [x] `createDeepAgent()` の呼び出しに `store` と `backend` (CompositeBackend で `/memories/` → StoreBackend にルーティング) を追加 — v1.9 API に合わせて `use_longterm_memory: true` からは読み替え
 - [x] `src/memory/policy.ts` で監査ポリシーの読み書きヘルパーを実装 (`store-helpers.ts` で BaseStore 直結の `readMemoryJson` / `writeMemoryJson` を共通化し、`policy.ts` は `AuditPolicy` 型と薄いラッパに留めた)
-- [ ] ユーザー好みの記録フロー（初回実行時に対話で記録し、次回以降は自動参照）
-- [ ] 過去の監査履歴を `/memories/history/` 配下に JSON で保存
-- [ ] テスト: セッション再起動前後でメモリが保持されることを確認
-- [ ] Review (typecheck + test + `/code-review`)
+- [x] ユーザー好みの記録フロー (`src/memory/preferences.ts`: `tone` (formal/polite) と `priorityAspects` の正規化付き read/write。**初回対話収集の HITL 統合は spec-006 に委譲**。本 spec の範囲は永続化レイヤのみ)
+- [x] 過去の監査履歴を `/memories/history/` 配下に JSON で保存 (`src/memory/history.ts`: `auditHistoryMemoryPath`, `slugifyAuditTarget`, `extractYearMonth`, `read/writeAuditHistoryEntry`。`AUDIT_SYSTEM_PROMPT` に Phase 0 として履歴参照指示を追加。**書き込みは agent ではなく orchestrator の責務**として明示)
+- [x] テスト: セッション再起動前後でメモリが保持されることを確認 (`tests/memory/cross-session.integration.test.ts`: 同一 BaseStore を共有した 2 回の `createAuditAgent` で 3 種類のメモリが復元される + `CompositeBackend(/memories/ → StoreBackend)` 経由の round-trip も legacy mode で実走させて配線証跡を残した)
+- [x] Review (typecheck + test + `/code-review` + advisor reconcile)
