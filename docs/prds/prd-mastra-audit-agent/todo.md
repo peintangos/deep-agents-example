@@ -16,7 +16,7 @@ Mark completed tasks with `- [x]` instead of removing them.
 - [x] spec-003: `security-auditor` / `maintenance-health` / `api-stability` / `community-adoption` の 4 サブエージェントを license-analyzer のパターンで量産する
 - [x] spec-003: `src/agent.ts` で 5 サブエージェントを `subagents` に登録する (実 API 呼び出しでの `task` 委譲検証は spec-004 で critic/レポート統合と合わせて行う)
 - [x] spec-004: `src/subagents/critic.ts` を追加し、整合性検証向けに system_prompt を設計する (5 観点の raw を読み `/raw/critic/findings.json` に書き出す)
-- [ ] spec-004: `src/reporter.ts` で 5 観点の raw + critic findings を読み込み、`out/mastra-audit-report.md` を生成する pure 関数を実装する
+- [x] spec-004: `src/reporter.ts` で 5 観点の raw + critic findings を読み込み、`out/mastra-audit-report.md` を生成する pure 関数を実装する
 - [ ] spec-004: `src/agent.ts` のメインエージェント system_prompt を "監査 → critic → reporter" のオーケストレーション順序で更新し、critic サブエージェントを `subagents` に登録する
 - [ ] spec-004: `.gitignore` に `out/` を追加し、生成物をリポジトリ管理外にする
 - [ ] spec-004: モック raw データを使った最小 E2E テスト (reporter が 5 観点セクションと findings セクションを含む Markdown を生成する) を書く
