@@ -162,6 +162,22 @@ createDeepAgent({
 
 **テスト戦略の段階化**: 「store 注入の配線が壊れない」を smoke test で確認 (agent 生成が throw しない + store API を直接叩いて put/get が動く) するのが最小単位。**実際に `/memories/` パスが StoreBackend 経由で永続化される** 統合テストは、`createAuditAgent` を LLM 呼び出しと独立して動かすのが難しいため、後続の spec-005 統合テストタスクで別途扱う。smoke レベルで「配線 gap」を早期に捕捉し、integration レベルで「動作 gap」を捕捉する 2 段階が効く。
 
+### `/memories/` を agent の外から読み書きする規約 (BaseStore 直結ヘルパー)
+
+`createDeepAgent({ store, backend: CompositeBackend(..., { "/memories/": new StoreBackend() }) })` を配線したあと、CLI / テスト / セットアップスクリプトのような **agent の外側** から `/memories/` のデータを読み書きしたいことがある (監査ポリシーの seed、ユーザー好みの初期化、過去履歴の参照など)。`StoreBackend` の内部 API には依存せず、注入した `BaseStore` を直接叩くのが最も低結合で、`src/memory/store-helpers.ts` がその規約を一箇所に閉じ込めている。
+
+**規約 3 点**:
+
+1. **namespace は `["filesystem"]`**: deepagents v1.9 の `StoreBackend.getNamespace()` は zero-arg 構築時に固定値 `["filesystem"]` を返す (`node_modules/deepagents/dist/index.js` line 4275 で確認)。`new StoreBackend()` を直接 agent.ts で使っているため、helper 側もこの namespace で揃える
+2. **キーは `/memories/` プレフィックスを剥がした絶対パス**: `CompositeBackend.getBackendAndKey` が `/memories/audit-policy.json` を `[backend, "/audit-policy.json"]` に変換してから StoreBackend に渡す (line 5183-5187)。helper 側で `store.put(["filesystem"], "/audit-policy.json", ...)` のように **`/memories/` を含めずに** put するのが正しい。ここを間違えると agent 側の `read_file("/memories/...")` で読めなくなる
+3. **値は FileData v2 形状**: `{ content: string, mimeType?: string, created_at: ISO, modified_at: ISO }`。`StoreBackend.convertStoreItemToFileData` は `content` / `created_at` / `modified_at` の 3 フィールドを必須としており、これらが欠けると agent 側の read で「Store item does not contain valid FileData fields」エラーで弾かれる (line 4286)。`mimeType` は省略可能だが `"application/json"` を入れておくと一貫性が保てる
+
+**`memoryStoreKey()` のテスト戦略**: 「`/memories/` で始まる正常系」「`/memories/history/<file>` のネスト」「`/raw/` のような prefix 不一致を弾く」「`/memories/` 単体を弾く」の 4 ケースで縛っておくと、後続の preferences / history ヘルパーで同じ規約を再実装したくなる誘惑を抑制できる。
+
+**`created_at` 保持は get → put の 2 段階で行う制約**: `writeMemoryJson` は既存値を `store.get` で取り出して `created_at` を再利用してから `store.put` で書き戻す。`InMemoryStore` のような単一プロセスの store では問題ないが、SQLite / Postgres 裏打ちの BaseStore に差し替えると同一キーへの並行書き込みで `created_at` がフリップする race が理論上残る。プロダクションで永続 store に切り替える際は backend 側の atomicity (transaction / compare-and-swap) で守るか、`created_at` を helper 側ではなく外側のメタデータレイヤで管理する設計に切り替えるのが筋。
+
+**helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。

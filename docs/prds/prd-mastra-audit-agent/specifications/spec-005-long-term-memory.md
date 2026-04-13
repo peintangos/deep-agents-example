@@ -44,7 +44,7 @@ Feature: 長期メモリがセッションをまたいで保持される
 ## Implementation Steps
 
 - [x] `createDeepAgent()` の呼び出しに `store` と `backend` (CompositeBackend で `/memories/` → StoreBackend にルーティング) を追加 — v1.9 API に合わせて `use_longterm_memory: true` からは読み替え
-- [ ] `src/memory/policy.ts` で監査ポリシーの読み書きヘルパーを実装
+- [x] `src/memory/policy.ts` で監査ポリシーの読み書きヘルパーを実装 (`store-helpers.ts` で BaseStore 直結の `readMemoryJson` / `writeMemoryJson` を共通化し、`policy.ts` は `AuditPolicy` 型と薄いラッパに留めた)
 - [ ] ユーザー好みの記録フロー（初回実行時に対話で記録し、次回以降は自動参照）
 - [ ] 過去の監査履歴を `/memories/history/` 配下に JSON で保存
 - [ ] テスト: セッション再起動前後でメモリが保持されることを確認
