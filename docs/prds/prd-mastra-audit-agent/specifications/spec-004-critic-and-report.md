@@ -30,7 +30,7 @@ Feature: critic サブエージェントと最終レポート生成
 
 ## Implementation Steps
 
-- [ ] `src/subagents/critic.ts` を追加し、system_prompt を整合性検証向けに設計
+- [x] `src/subagents/critic.ts` を追加し、system_prompt を整合性検証向けに設計
 - [ ] `src/reporter.ts` で raw データ群を読み込んで Markdown を生成する関数を実装
 - [ ] メインエージェントのオーケストレーションフローを更新し、監査 → critic → reporter の順で呼ぶ
 - [ ] `out/` を git 管理外にする（`.gitignore` に追加）

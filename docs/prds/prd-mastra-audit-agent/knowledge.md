@@ -57,6 +57,28 @@ system_prompt には必ず次の 4 セクションを入れる:
 
 **量産時のテストで引っかかったケース (api-stability)**: テストで \`systemPrompt.toContain("SemVer")\` を検証していたが、プロンプト本体に "SemVer" 文字列を入れ忘れていた (コードコメントにだけ書いていた)。テストは**仕様アサーションとしても機能する**ので、失敗したら「テストが期待する用語がプロンプトに足りない = その概念を LLM に伝え損ねている」と解釈して、プロンプトに用語を追加する形で直すのが筋。逆にすることも可能だがプロンプトの意図伝達力が落ちる。
 
+### critic サブエージェントは `tools` 未指定で default に委ねる
+
+critic は 5 観点の raw データ (`read_file`) と findings 出力 (`write_file`) しか要らないので、**`tools` フィールドを設定しない**のが正解。deepagents の `filesystemMiddleware` が自動で `read_file` / `write_file` / `edit_file` を供給してくれるので、critic 側で `tools: []` や `tools: [builtinReadFile]` のような明示をすると、むしろ "default tools を上書きしてしまう" 事故の温床になる。
+
+factory 関数としての **インターフェース統一** は `CriticOptions.tools` を optional で受け取りつつ、未指定時は `agent.tools` を**設定しない**という条件分岐で保つ:
+
+\`\`\`ts
+const agent: SubAgent = { name, description, systemPrompt };
+if (options.tools) {
+  agent.tools = [...options.tools] as StructuredTool[];
+}
+return agent;
+\`\`\`
+
+これで license-analyzer 等の「ツール注入系 factory」と同じ呼び出し方を保ちつつ、critic は default tools を失わずに済む。テストでも `expect(subagent.tools).toBeUndefined()` を明示的に検証しておくと将来の誤変更を防げる。
+
+### 観点間検証サブエージェントの system_prompt は "入力パスを全部列挙する"
+
+critic のような「複数の raw データを横断して検証する」サブエージェントでは、system_prompt のミッション欄に**読むべき raw パスを全部ベタ書きする**のが効く。`rawPath("license", "result.json")` 等を JS 側で構築して template literal に埋め込むことで、パスが変わったときにサブエージェントの指示も自動追従する (ハードコードを一箇所に集約)。
+
+さらに「overall_assessment の判定基準」のような**導出ルール**を prompt に書いておくと、LLM の出力が安定する。列挙型 (`"pass" | "warnings" | "blocked"`) だけでなく**どういう条件でどれを出すか**を同時に示すのがポイント。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。
