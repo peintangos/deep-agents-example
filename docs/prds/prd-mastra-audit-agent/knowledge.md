@@ -111,6 +111,18 @@ Ralph Matsuo テンプレートの `init-repo` 段階で、`.gitignore` の "Bui
 
 これは「生成物ディレクトリは tsc からも git からも外す」という対称な契約が初期テンプレートに埋め込まれていた例。同様のパターン (`dist/`, `build/`, `coverage/`, `.next/` も既存) があるので、PRD で出力ディレクトリを追加するときは「テンプレートが既にカバーしているか」を最初にチェックすると無駄なコミットが減る。
 
+### E2E テストは "pure + thin wrapper" の wrapper 側に向けて書く
+
+spec-004 の受け入れ条件は `out/mastra-audit-report.md` が**実ファイルとして生成されること**だった。pure な `generateAuditReport` だけでは満たせないため、`writeAuditReport(input, outputPath)` という**副作用を持つ薄いラッパ**を別途 export した (中身は `generateAuditReport` + `mkdir({recursive:true})` + `writeFile` の 3 行)。
+
+この 2 関数構成は CLI で確立した "pure 関数 + 薄い entry" 分離の再現で、テスト戦略もそのまま流用できる:
+
+1. **ユニットテスト** (`tests/reporter.test.ts`): pure 関数 `generateAuditReport` を呼び、返り値の文字列に対して 10 ケース検証する。ディスクに触らないので高速・決定論的
+2. **E2E テスト** (`tests/audit-pipeline.e2e.test.ts`): `beforeEach` で `mkdtemp(tmpdir(), "audit-pipeline-e2e-")` し、`writeAuditReport` を呼んだあと `stat` + `readFile` で実ファイルを検証。`afterEach` で `rm(workdir, { recursive: true, force: true })` でクリーンアップ
+3. **LLM を伴う本物の E2E** (spec-009 予定): OpenRouter / GitHub API を実際に叩くパイプライン E2E は別レイヤに分離
+
+E2E テストでは **idempotency** (2 回実行で同じ内容になる) と **intermediate dir auto-create** (`out/deeply/nested/` のようなパスも事前 mkdir 不要) を検証しておくと、オーケストレーション層からこのラッパを使うときの前提条件が守られる。モック raw データは E2E ファイルの中に `mockInput()` ヘルパとして閉じ込め、reporter.test.ts の `baseInput()` と**意図的に重複を許す** (E2E は独立して動かせることを優先)。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。

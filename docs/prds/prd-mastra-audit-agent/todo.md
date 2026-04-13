@@ -19,4 +19,4 @@ Mark completed tasks with `- [x]` instead of removing them.
 - [x] spec-004: `src/reporter.ts` で 5 観点の raw + critic findings を読み込み、`out/mastra-audit-report.md` を生成する pure 関数を実装する
 - [x] spec-004: `src/agent.ts` のメインエージェント system_prompt を "監査 → critic → reporter" のオーケストレーション順序で更新し、critic サブエージェントを `subagents` に登録する
 - [x] spec-004: `.gitignore` に `out/` を追加し、生成物をリポジトリ管理外にする (Ralph Matsuo テンプレート初期化時点で既に `out/` が含まれていたことを確認)
-- [ ] spec-004: モック raw データを使った最小 E2E テスト (reporter が 5 観点セクションと findings セクションを含む Markdown を生成する) を書く
+- [x] spec-004: モック raw データを使った最小 E2E テスト (reporter が 5 観点セクションと findings セクションを含む Markdown を生成する) を書く

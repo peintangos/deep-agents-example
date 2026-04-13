@@ -5,14 +5,21 @@
  * 受け取り、Markdown 文字列を組み立てる純粋関数を提供する。
  *
  * 設計方針:
- *   - I/O を持たない pure function にしておくことで、deepagents の仮想 FS 上の
- *     データでも、ユニットテストのモック JSON でも、同じ関数で統合できる。
+ *   - I/O を持たない pure function (`generateAuditReport`) を中核に置くことで、
+ *     deepagents の仮想 FS 上のデータでも、ユニットテストのモック JSON でも、
+ *     同じ関数でレポートを組み立てられる。
+ *   - 副作用を伴う薄いラッパ (`writeAuditReport`) を別途 export し、実ファイル
+ *     (`out/*.md`) への書き出しと intermediate directory の作成を一箇所に集約する。
+ *     オーケストレーション層 (CLI / agent.ts) はこのラッパを呼ぶだけでよい。
  *   - サブエージェントの raw データは `Record<string, unknown>` として受け取り、
  *     未知のフィールドも失わずに JSON ブロックで埋め込む。個別フィールドの型付けは
  *     サブエージェント側の出力契約が安定した後で段階的に狭めていく。
  *   - critic findings のみは構造を明示して typed にする (重要度でのソート・
  *     overall_assessment 表示に使うため)。
  */
+
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type AspectRaw = Readonly<Record<string, unknown>>;
 
@@ -145,4 +152,23 @@ function sortFindingsBySeverity(
   return [...findings].sort(
     (a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity],
   );
+}
+
+/**
+ * レポート本文を組み立てて、指定パスに Markdown ファイルとして書き出す。
+ *
+ * `generateAuditReport` (pure) に fs.writeFile を薄くかぶせたラッパ。出力先の
+ * 親ディレクトリが存在しない場合は再帰的に作成するので、呼び出し側は
+ * `out/mastra-audit-report.md` のような未作成のパスをそのまま渡せる。
+ *
+ * オーケストレーション層 (CLI / agent.ts) から呼ばれる想定。ユニットテストは
+ * `generateAuditReport` を直接呼び、E2E テストはこのラッパを tmpdir に向けて呼ぶ。
+ */
+export async function writeAuditReport(
+  input: GenerateAuditReportInput,
+  outputPath: string,
+): Promise<void> {
+  const body = generateAuditReport(input);
+  await mkdir(dirname(outputPath), { recursive: true });
+  await writeFile(outputPath, body, "utf8");
 }
