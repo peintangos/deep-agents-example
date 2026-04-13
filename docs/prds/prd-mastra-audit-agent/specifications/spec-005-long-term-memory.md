@@ -8,7 +8,14 @@ Deep Agents の長期メモリ機能 (`/memories/` プレフィックス) を使
 - **ユーザー好み**: レポート文体（だ/である調 vs ですます調）、優先する監査観点
 - **過去の監査履歴**: 同じ OSS を再監査する際の差分取得用
 
-`LangGraph Store` (InMemoryStore から開始し、必要なら SQLite に切替可能) と `use_longterm_memory: true` を使う。
+`LangGraph Store` (InMemoryStore から開始し、必要なら SQLite に切替可能) を使う。
+
+**v1.9 API への適応**: 当初 spec では Python 版 deepagents の `use_longterm_memory: true` フラグを想定していたが、deepagents TS v1.9 には同等のフラグは存在しない。代わりに以下の配線で同等機能を実現する:
+
+1. `createDeepAgent({ store: BaseStore })` で store を注入
+2. `backend` オプションに `new CompositeBackend(new StateBackend(config), { "/memories/": new StoreBackend() })` を渡し、パスプレフィックスベースのルーティングで `/memories/` 配下を永続化
+
+これで `write_file("/memories/x.json", ...)` のような既存の built-in ツール呼び出しがそのまま長期メモリに振り分けられる。
 
 ## Acceptance Criteria
 
@@ -36,7 +43,7 @@ Feature: 長期メモリがセッションをまたいで保持される
 
 ## Implementation Steps
 
-- [ ] `createDeepAgent()` の呼び出しに `store` と `use_longterm_memory: true` を追加
+- [x] `createDeepAgent()` の呼び出しに `store` と `backend` (CompositeBackend で `/memories/` → StoreBackend にルーティング) を追加 — v1.9 API に合わせて `use_longterm_memory: true` からは読み替え
 - [ ] `src/memory/policy.ts` で監査ポリシーの読み書きヘルパーを実装
 - [ ] ユーザー好みの記録フロー（初回実行時に対話で記録し、次回以降は自動参照）
 - [ ] 過去の監査履歴を `/memories/history/` 配下に JSON で保存

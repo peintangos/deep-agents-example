@@ -1,6 +1,13 @@
 import { ChatOpenAI } from "@langchain/openai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import { createDeepAgent } from "deepagents";
+import {
+  createDeepAgent,
+  CompositeBackend,
+  StateBackend,
+  StoreBackend,
+} from "deepagents";
+import { InMemoryStore } from "@langchain/langgraph-checkpoint";
+import type { BaseStore } from "@langchain/langgraph-checkpoint";
 import { createLicenseAnalyzerSubAgent } from "./subagents/license-analyzer";
 import { createSecurityAuditorSubAgent } from "./subagents/security-auditor";
 import { createMaintenanceHealthSubAgent } from "./subagents/maintenance-health";
@@ -82,7 +89,31 @@ export function createLlm(): BaseChatModel {
   }) as unknown as BaseChatModel;
 }
 
-export function createAuditAgent() {
+/**
+ * `createAuditAgent` へのオプション。
+ */
+export interface CreateAuditAgentOptions {
+  /**
+   * 長期メモリの永続化に使う LangGraph Store。
+   *
+   * deepagents は `/memories/` プレフィックスを {@link StoreBackend} に
+   * ルーティングすることで、セッションをまたいで値を保持する。ここに渡した
+   * `BaseStore` インスタンスが deepagents の実行コンテキスト経由で
+   * StoreBackend から参照される。
+   *
+   * 省略時はプロセスローカルな `InMemoryStore` が 1 エージェント 1 インスタンスで
+   * 作られる (プロセスが終わると消える)。同じプロセス内で複数の
+   * `createAuditAgent` 呼び出しに**跨いで** `/memories/` を共有したい場合は、
+   * 呼び出し側で `new InMemoryStore()` を 1 つ作って両方に渡すこと。
+   *
+   * プロダクションで永続化したい場合は SQLite / Postgres などディスク裏打ちの
+   * `BaseStore` 実装を差し替える想定。
+   */
+  readonly store?: BaseStore;
+}
+
+export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
+  const store = options.store ?? new InMemoryStore();
   return createDeepAgent({
     model: createLlm(),
     systemPrompt: AUDIT_SYSTEM_PROMPT,
@@ -94,5 +125,19 @@ export function createAuditAgent() {
       createCommunityAdoptionSubAgent(),
       createCriticSubAgent(),
     ],
+    store,
+    /**
+     * `/memories/` 配下はセッション横断で永続化したいので StoreBackend に、
+     * それ以外のすべてのパス (`/raw/`, `/reports/`, `/` 直下の transient データ等) は
+     * deepagents のデフォルト同様 StateBackend (ephemeral) に振り分ける。
+     *
+     * これが spec-005 のコア配線。`CompositeBackend` の prefix ルーティング経由で
+     * サブエージェントは `write_file("/memories/audit-policy.json", ...)` のような
+     * 既存の built-in ツールを使うだけで長期メモリにアクセスできる。
+     */
+    backend: (config) =>
+      new CompositeBackend(new StateBackend(config), {
+        "/memories/": new StoreBackend(),
+      }),
   });
 }

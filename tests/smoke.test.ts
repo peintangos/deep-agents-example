@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { InMemoryStore } from "@langchain/langgraph-checkpoint";
 import {
   createAuditAgent,
   DEFAULT_MODEL_NAME,
@@ -81,5 +82,58 @@ describe("AUDIT_SYSTEM_PROMPT orchestration structure", () => {
 
   it("documents the fact-only principle", () => {
     expect(AUDIT_SYSTEM_PROMPT).toMatch(/ファクト|推測/);
+  });
+});
+
+describe("createAuditAgent store injection (spec-005)", () => {
+  const originalKey = process.env.OPENROUTER_API_KEY;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-dummy-test-key";
+  });
+
+  afterEach(() => {
+    if (originalKey === undefined) {
+      delete process.env.OPENROUTER_API_KEY;
+    } else {
+      process.env.OPENROUTER_API_KEY = originalKey;
+    }
+  });
+
+  it("creates an agent without throwing when a custom InMemoryStore is injected", () => {
+    const store = new InMemoryStore();
+    const agent = createAuditAgent({ store });
+    expect(agent).toBeDefined();
+    expect(typeof agent.invoke).toBe("function");
+  });
+
+  it("creates a default InMemoryStore when no store option is passed", () => {
+    const agent = createAuditAgent();
+    expect(agent).toBeDefined();
+  });
+
+  it("allows two agents to share the same store for cross-session /memories/ persistence", () => {
+    const sharedStore = new InMemoryStore();
+    const agentA = createAuditAgent({ store: sharedStore });
+    const agentB = createAuditAgent({ store: sharedStore });
+    expect(agentA).toBeDefined();
+    expect(agentB).toBeDefined();
+    // The actual cross-agent read/write behavior is exercised by the
+    // spec-005 integration test that persists data via /memories/ paths.
+    // Here we only assert the wiring constructs two valid agents over the
+    // same BaseStore instance without throwing.
+  });
+
+  it("can persist and retrieve data directly through the injected store (store-level proof)", async () => {
+    const store = new InMemoryStore();
+    createAuditAgent({ store });
+
+    // deepagents の StoreBackend は `/memories/` 配下の書き込みを LangGraph store に
+    // 流すが、その namespace は deepagents 内部で管理されている。ここではその
+    // namespace を通さず、store API を直接叩くことで「注入された store が
+    // 書き込み可能な生きたインスタンスである」最低限の証跡を残す。
+    await store.put(["test-namespace"], "key1", { hello: "world" });
+    const item = await store.get(["test-namespace"], "key1");
+    expect(item?.value).toEqual({ hello: "world" });
   });
 });

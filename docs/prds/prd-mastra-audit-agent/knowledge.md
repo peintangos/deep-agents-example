@@ -123,6 +123,45 @@ spec-004 の受け入れ条件は `out/mastra-audit-report.md` が**実ファイ
 
 E2E テストでは **idempotency** (2 回実行で同じ内容になる) と **intermediate dir auto-create** (`out/deeply/nested/` のようなパスも事前 mkdir 不要) を検証しておくと、オーケストレーション層からこのラッパを使うときの前提条件が守られる。モック raw データは E2E ファイルの中に `mockInput()` ヘルパとして閉じ込め、reporter.test.ts の `baseInput()` と**意図的に重複を許す** (E2E は独立して動かせることを優先)。
 
+### deepagents v1.9 の長期メモリ配線: store + CompositeBackend(/memories/ → StoreBackend)
+
+**重要**: spec-005 は当初 Python 版由来の `use_longterm_memory: true` フラグを想定していたが、**deepagents TS v1.9 にそのフラグは存在しない**。型定義 (`node_modules/deepagents/dist/index.d.ts`) を一次ソースとして確認済み。正しい配線は以下:
+
+\`\`\`ts
+import {
+  createDeepAgent,
+  CompositeBackend,
+  StateBackend,
+  StoreBackend,
+} from "deepagents";
+import { InMemoryStore } from "@langchain/langgraph-checkpoint";
+
+createDeepAgent({
+  // ...
+  store: new InMemoryStore(),  // ← LangGraph の BaseStore
+  backend: (config) =>
+    new CompositeBackend(new StateBackend(config), {
+      "/memories/": new StoreBackend(),  // ← プレフィックスルーティング
+    }),
+});
+\`\`\`
+
+**配線のメンタルモデル**:
+
+1. **`store` を渡すだけでは不十分**: `createDeepAgent` のデフォルト backend は `(config) => new StateBackend(config)` (`node_modules/deepagents/dist/index.js` line 6457 で確認)。つまり `store` だけ渡しても StateBackend は store を使わず、`/memories/` 配下も ephemeral になってしまう
+2. **`CompositeBackend` で明示ルーティング**: `{ "/memories/": new StoreBackend() }` と指定することで、`/memories/` 配下の書き込みだけが StoreBackend 経由で `BaseStore` に流れる。他のパス (`/raw/`, `/reports/` 等) は StateBackend に行き session-local に留まる
+3. **`new StoreBackend()` は zero-arg で OK**: 内部で `getLangGraphStore()` 経由で実行コンテキストから `store` を取得する設計。`createDeepAgent({ store })` がそのコンテキストを提供する
+4. **CompositeBackend の prefix 照合は末尾スラッシュ込み**: fs-layout.ts の `classifyPath` と同じく、ルートキーは `/memories/` (trailing slash) を書く。`/memories` にすると prefix 一致の罠にハマる (これは spec-002 の `classifyPath` 実装で学んだ教訓の再利用)
+
+**DI パターン**: `createAuditAgent({ store? })` で BaseStore を optional 注入可能にしておくと:
+- テスト: `new InMemoryStore()` を明示的に渡して状態を分離
+- プロダクション: SQLite / Postgres 裏打ちの BaseStore に差し替え
+- 同プロセス内での "セッション跨ぎ共有": 呼び出し側で 1 つの `InMemoryStore` を作って両方の `createAuditAgent` 呼び出しに渡す
+
+**spec 記述の API gap は記録して読み替え**: spec-005 の Implementation Steps に書かれていた `use_longterm_memory: true` は Python 版由来。spec を破棄せず「v1.9 API に合わせて CompositeBackend 配線に読み替え」という注釈を spec 本体に追記した。これは**ドキュメントを正、コードを実装** の原則を守りつつ、一次ソース (型定義) との差分に気づいたら spec 側を更新する流れ。
+
+**テスト戦略の段階化**: 「store 注入の配線が壊れない」を smoke test で確認 (agent 生成が throw しない + store API を直接叩いて put/get が動く) するのが最小単位。**実際に `/memories/` パスが StoreBackend 経由で永続化される** 統合テストは、`createAuditAgent` を LLM 呼び出しと独立して動かすのが難しいため、後続の spec-005 統合テストタスクで別途扱う。smoke レベルで「配線 gap」を早期に捕捉し、integration レベルで「動作 gap」を捕捉する 2 段階が効く。
+
 ### read_raw / write_raw を独自 Tool にしない設計判断
 
 spec-002 では当初 `read_raw` / `write_raw` / `fetch_github` / `query_osv` の 4 つを独自ツールとして実装する計画だったが、`read_raw` / `write_raw` は**独自 Tool にしないほうが正しい**という結論に至った。
