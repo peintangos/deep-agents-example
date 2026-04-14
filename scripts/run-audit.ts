@@ -17,6 +17,11 @@ import {
   resolveHitlInterrupt,
   type HitlDecisionPolicy,
 } from "../src/hitl";
+import {
+  appendHitlEvents,
+  createHitlLogEvent,
+  type HitlLogEvent,
+} from "../src/hitl-log";
 
 /**
  * HITL ループの安全装置。policy がバグって無限に interrupt を生み続けるケースを
@@ -79,6 +84,20 @@ const realInvoker: AgentInvoker = async (prompt) => {
     if (!interrupt) break;
 
     const response = await resolveHitlInterrupt(interrupt, consolePolicy);
+
+    // 判断を監査履歴として `/raw/hitl/log.jsonl` に追記する。`resolveHitlInterrupt`
+    // は `actionRequests` の順序を保ってそのまま `decisions` に詰めるため、
+    // index ベースのペアリングで action[i] ↔ decisions[i] が正しく対応する。
+    const actions = interrupt.value?.actionRequests ?? [];
+    const events: HitlLogEvent[] = [];
+    for (let i = 0; i < actions.length; i++) {
+      const action = actions[i];
+      const decision = response.decisions[i];
+      if (!action || !decision) continue;
+      events.push(createHitlLogEvent(action, decision));
+    }
+    await appendHitlEvents(events);
+
     result = await agent.invoke(new Command({ resume: response }), config);
 
     if (iteration === MAX_HITL_ITERATIONS - 1 && detectHitlInterrupt(result)) {

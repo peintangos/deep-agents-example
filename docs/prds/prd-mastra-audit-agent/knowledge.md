@@ -178,6 +178,38 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### HITL ログは物理ファイル (`out/raw/hitl/log.jsonl`) に書く
+
+spec-006 の 3 番目のタスクで HITL 判断ログを JSONL で永続化した。`src/hitl-log.ts` が pure 関数 (`createHitlLogEvent` / `formatHitlEventLine`) と I/O 関数 (`appendHitlEvents` / `readHitlEvents`) の 2 層で構成されている。
+
+**論理パスと物理パスの分離**: spec 本文の「`/raw/hitl/log.jsonl`」という表記は論理パス (agent の仮想 FS を連想させる)。しかし HITL は **CLI 層 (`scripts/run-audit.ts`) で emit されるイベント** で、agent の仮想 FS の writer chain には乗らない。したがって実体は物理ファイルで、デフォルトパスを `out/raw/hitl/log.jsonl` にして**論理的な階層と物理的な配置を一致** させた (かつ `out/` は spec-004 で `.gitignore` 済み)。
+
+**JSONL 採用の根拠**:
+
+1. **append-only フォーマット**なので CLI クラッシュや `kill -9` で途中行が欠けても残りの有効な行を使える
+2. `JSON.stringify(event) + "\n"` の **愚直な serializer** で十分。バイナリフォーマットや DB を入れる必要はない
+3. 読み出し側 (`readHitlEvents`) は **壊れた行をスキップ**して有効行だけ返す。1 行の損害を全体に波及させない。これが無いと append 中の crash 復旧で過去の判断履歴全部を失う
+4. Zenn 記事や監査レポートのメタデータとしても使いやすい (`jq` で直接 grep 可能)
+
+**`appendHitlEvents([])` は no-op**: 空配列を渡されたら一切 I/O を起こさない。HITL ループで interrupt の `actionRequests` がゼロ件の極端ケース (現状起きないが API 上はあり得る) を誤って空ファイル作成で汚さないための小さな不変条件。これを仕込むと呼び出し側で `if (events.length > 0)` の防御を書かなくて済む。
+
+**index ベースのペアリングは `resolveHitlInterrupt` の順序保存に依存する**:
+
+\`\`\`ts
+// resolveHitlInterrupt は actionRequests の順序を保ってそのまま decisions に詰めるため、
+// index ベースで action[i] ↔ decisions[i] が正しく対応する。
+for (let i = 0; i < actions.length; i++) {
+  const action = actions[i];
+  const decision = response.decisions[i];
+  if (!action || !decision) continue;
+  events.push(createHitlLogEvent(action, decision));
+}
+\`\`\`
+
+この契約は `tests/hitl.test.ts` の "produces one decision per actionRequest (preserving order)" で縛られている。将来 `resolveHitlInterrupt` が action を並び替える実装に変えたら、**テストが赤くなるし、HITL ログのペアリングも破綻する** — この 2 箇所が**同じ不変条件**に依存していることをコメントで明示しておくのが、後の regression 調査を楽にする。
+
+**pure vs I/O の分離パターン (3 回目の再利用)**: reporter (`generateAuditReport` / `writeAuditReport`)、hitl (`detectHitlInterrupt` / `runHitlLoop`)、hitl-log (`formatHitlEventLine` / `appendHitlEvents`) のすべてが同じパターンで書かれている。pure 関数 (決定論的ユニットテスト) + 薄い I/O ラッパ (tmpdir E2E) の 2 層で、テスト戦略も統一できる。このパターンを繰り返すのが本プロジェクトの一貫性の源泉。
+
 ### HITL 実行ループ: pure core + thin entry で interrupt/resume を書く
 
 spec-006 の 2 番目のタスクで CLI 側の HITL ハンドラを実装した。`src/cli.ts` 本体は触らず、新規に **`src/hitl.ts`** に pure core を置き、`scripts/run-audit.ts` に対話 I/O (readline-based policy) と実行ループを薄く載せる 2 層構成にした。
