@@ -5,10 +5,12 @@ import { rawPath } from "../fs-layout";
 
 /**
  * api-stability サブエージェントに流す skill ソースのデフォルト。
- * 詳細は license-analyzer.ts の解説参照。
+ *
+ * 粒度は `/skills/audit/` (5 aspect すべての metadata を見せる)。観点単独パスは
+ * `listSkillsFromBackend` の 1 階層走査制限で使えない。詳細は license-analyzer.ts 参照。
  */
 export const DEFAULT_API_STABILITY_SKILLS: readonly string[] = [
-  "/skills/audit/api-stability/",
+  "/skills/audit/",
 ] as const;
 
 export interface ApiStabilityOptions {

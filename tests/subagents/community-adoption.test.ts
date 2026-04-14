@@ -44,11 +44,14 @@ describe("createCommunityAdoptionSubAgent", () => {
     expect(subagent.systemPrompt).toMatch(/niche|rising|popular|mainstream/);
   });
 
-  // spec-007: skill 配線の粒度検証。
-  it("assigns exactly the community skill source by default (progressive disclosure scope)", () => {
+  // spec-007: skill 配線の粒度検証。audit カテゴリ全体を読み、report は読まない。
+  // 観点単独パスは listSkillsFromBackend の 1 階層走査制限で使えない
+  // (license-analyzer.test.ts の解説参照)。
+  it("assigns /skills/audit/ as source by default (audit-scope progressive disclosure)", () => {
     const subagent = createCommunityAdoptionSubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.skills).toEqual([...DEFAULT_COMMUNITY_ADOPTION_SKILLS]);
-    expect(DEFAULT_COMMUNITY_ADOPTION_SKILLS).toEqual(["/skills/audit/community/"]);
+    expect(DEFAULT_COMMUNITY_ADOPTION_SKILLS).toEqual(["/skills/audit/"]);
+    expect([...DEFAULT_COMMUNITY_ADOPTION_SKILLS]).not.toContain("/skills/report/");
   });
 
   it("accepts a custom skills array that overrides the default", () => {

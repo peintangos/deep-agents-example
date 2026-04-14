@@ -44,11 +44,14 @@ describe("createApiStabilitySubAgent", () => {
     expect(subagent.systemPrompt).toMatch(/stable|maturing|unstable/);
   });
 
-  // spec-007: skill 配線の粒度検証。
-  it("assigns exactly the api-stability skill source by default (progressive disclosure scope)", () => {
+  // spec-007: skill 配線の粒度検証。audit カテゴリ全体を読み、report は読まない。
+  // 観点単独パスは listSkillsFromBackend の 1 階層走査制限で使えない
+  // (license-analyzer.test.ts の解説参照)。
+  it("assigns /skills/audit/ as source by default (audit-scope progressive disclosure)", () => {
     const subagent = createApiStabilitySubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.skills).toEqual([...DEFAULT_API_STABILITY_SKILLS]);
-    expect(DEFAULT_API_STABILITY_SKILLS).toEqual(["/skills/audit/api-stability/"]);
+    expect(DEFAULT_API_STABILITY_SKILLS).toEqual(["/skills/audit/"]);
+    expect([...DEFAULT_API_STABILITY_SKILLS]).not.toContain("/skills/report/");
   });
 
   it("accepts a custom skills array that overrides the default", () => {

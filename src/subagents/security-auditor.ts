@@ -5,11 +5,14 @@ import { rawPath } from "../fs-layout";
 
 /**
  * security-auditor サブエージェントに流す skill ソースのデフォルト。
- * 段階的開示の原則で、このサブエージェントは自分の担当観点 (脆弱性スキャン)
- * の SKILL.md だけを読む。詳細は license-analyzer.ts の解説参照。
+ *
+ * 粒度は `/skills/audit/` (5 aspect すべての metadata を見せる)。`listSkillsFromBackend`
+ * が 1 階層のディレクトリ走査しかサポートしないため、`/skills/audit/security/` のような
+ * 観点単独パスは 0 skill しか返らず使えない。詳細は license-analyzer.ts を参照。
+ * report 系は流れないため、subagent/main の主たる filter 境界は "audit vs report"。
  */
 export const DEFAULT_SECURITY_AUDITOR_SKILLS: readonly string[] = [
-  "/skills/audit/security/",
+  "/skills/audit/",
 ] as const;
 
 export interface SecurityAuditorOptions {

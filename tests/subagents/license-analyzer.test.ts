@@ -48,12 +48,19 @@ describe("createLicenseAnalyzerSubAgent", () => {
     expect(subagent.systemPrompt).toMatch(/ファクト|推測は避/);
   });
 
-  // spec-007: skill 配線の粒度検証。license-analyzer は license 観点の 1 つだけを
-  // 段階的開示で受け取り、他観点や report 文体 skill は流れないことを保証する。
-  it("assigns exactly the license skill source by default (progressive disclosure scope)", () => {
+  // spec-007: skill 配線の粒度検証。license-analyzer は audit カテゴリ全体 (5 aspects)
+  // の metadata を受け取るが、report カテゴリは受け取らない (filter 境界が
+  // "audit vs report")。観点単独パス (例 `/skills/audit/license/`) は
+  // deepagents v1.9 の listSkillsFromBackend が 1 階層のサブディレクトリ走査しか
+  // サポートしないため使えず、0 skill しか返らない — spec-007 のテスト実装時に
+  // 検出した制約。実質的な "license 観点だけを読む" ロジックは LLM の description
+  // マッチ + 段階的開示で実現する (本文は必要時のみ read_file される)。
+  it("assigns /skills/audit/ as source by default (audit-scope progressive disclosure)", () => {
     const subagent = createLicenseAnalyzerSubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.skills).toEqual([...DEFAULT_LICENSE_ANALYZER_SKILLS]);
-    expect(DEFAULT_LICENSE_ANALYZER_SKILLS).toEqual(["/skills/audit/license/"]);
+    expect(DEFAULT_LICENSE_ANALYZER_SKILLS).toEqual(["/skills/audit/"]);
+    // report 系は流れないことを明示 (subagent/main の主たる filter 境界)。
+    expect([...DEFAULT_LICENSE_ANALYZER_SKILLS]).not.toContain("/skills/report/");
   });
 
   it("accepts a custom skills array that overrides the default", () => {

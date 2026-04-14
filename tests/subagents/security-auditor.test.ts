@@ -44,11 +44,14 @@ describe("createSecurityAuditorSubAgent", () => {
     expect(subagent.systemPrompt).toMatch(/CRITICAL|HIGH|MEDIUM|LOW/);
   });
 
-  // spec-007: skill 配線の粒度検証。security-auditor は security 観点だけを受け取る。
-  it("assigns exactly the security skill source by default (progressive disclosure scope)", () => {
+  // spec-007: skill 配線の粒度検証。audit カテゴリ全体を読み、report は読まない。
+  // 観点単独パスは listSkillsFromBackend の 1 階層走査制限で使えない
+  // (license-analyzer.test.ts の解説参照)。
+  it("assigns /skills/audit/ as source by default (audit-scope progressive disclosure)", () => {
     const subagent = createSecurityAuditorSubAgent({ tools: [fakeTool("query_osv")] });
     expect(subagent.skills).toEqual([...DEFAULT_SECURITY_AUDITOR_SKILLS]);
-    expect(DEFAULT_SECURITY_AUDITOR_SKILLS).toEqual(["/skills/audit/security/"]);
+    expect(DEFAULT_SECURITY_AUDITOR_SKILLS).toEqual(["/skills/audit/"]);
+    expect([...DEFAULT_SECURITY_AUDITOR_SKILLS]).not.toContain("/skills/report/");
   });
 
   it("accepts a custom skills array that overrides the default", () => {

@@ -6,17 +6,24 @@ import { rawPath } from "../fs-layout";
 /**
  * license-analyzer サブエージェントに流す skill ソースのデフォルト。
  *
- * 段階的開示の原則で、このサブエージェントには自分の担当観点の SKILL.md だけを
- * 流す。メインエージェントの {@link DEFAULT_SKILL_SOURCES} は `/skills/audit/` +
- * `/skills/report/` の広いソース指定だが、license-analyzer は自観点の判断基準
- * (SPDX 特定 / 商用利用制約 / 互換性チェック) さえ読めれば良い。
+ * **粒度は `/skills/audit/` 直下の 5 aspect を全部見せる**。以前は
+ * `/skills/audit/license/` のように観点単独のパスを試したが、deepagents v1.9 の
+ * `listSkillsFromBackend` は **source パスの直下にある "サブディレクトリ" を 1 階層
+ * だけ走査** し、各サブディレクトリに `SKILL.md` があるかを見る方式なので、
+ * `/skills/audit/license/` を source にすると中身は `SKILL.md` (ファイル) だけで
+ * サブディレクトリが無いため 0 skill しか返らない。これを回避するには
+ * (1) skills/ の物理レイアウトを再構造化するか、(2) audit/ 全体を見せて LLM の
+ * description マッチで実質的な選択を任せるかの 2 択。本プロジェクトでは (2) を
+ * 採用し、観測サブエージェントには audit 5 observation 分の metadata すべてを
+ * 見せる (本文は段階的開示で必要分だけ読む)。**report 系は流れない** ので、
+ * subagent/main の主たる filter 境界は "audit vs report" になる。
  *
- * deepagents v1.9 では **custom subagent はメインの skills を継承しない**
+ * deepagents v1.9 では custom subagent はメインの skills を継承しない
  * (general-purpose だけが継承) ため、各 factory で明示的に skill パスを返す
  * 必要がある。ここを省略すると license-analyzer は SKILL.md を一切読まずに動く。
  */
 export const DEFAULT_LICENSE_ANALYZER_SKILLS: readonly string[] = [
-  "/skills/audit/license/",
+  "/skills/audit/",
 ] as const;
 
 export interface LicenseAnalyzerOptions {
