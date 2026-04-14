@@ -29,3 +29,8 @@ Mark completed tasks with `- [x]` instead of removing them.
 - [x] spec-006: CLI (`src/cli.ts`) に interrupt 検出 → 承認プロンプト → `Command(resume=...)` ハンドラを pure 関数として追加する (interactive I/O は `scripts/run-audit.ts` 側に薄く置く) — `src/hitl.ts` に pure core (`detectHitlInterrupt` / `resolveHitlInterrupt` / `formatActionForHuman` / `APPROVE_ALL_POLICY` / `REJECT_ALL_POLICY`) を新設し、対話 I/O と HITL ループは `scripts/run-audit.ts` 側に配置した
 - [x] spec-006: 承認 / 却下イベントを `/raw/hitl/log.jsonl` に追記する HITL ログヘルパーを実装する — `src/hitl-log.ts` に pure 関数 (`createHitlLogEvent` / `formatHitlEventLine`) と I/O 関数 (`appendHitlEvents` / `readHitlEvents`) を実装し、`scripts/run-audit.ts` の HITL ループから各 decision を `out/raw/hitl/log.jsonl` に追記
 - [x] spec-006: interrupt → resume → 完了 の 1 サイクルを検証する E2E テストを書く (LLM 呼び出しは差し替え可能にし、interrupt の発火と resume の反映だけを決定論的に追う) — `tests/hitl-e2e.test.ts` で langchain の `createAgent` + `humanInTheLoopMiddleware` + factory-based `fakeModel` を使い、interrupt 検出 / approve / reject / 2 thread 並行の 4 ケースを決定論的に検証
+- [x] spec-007: `skills/audit/{license,security,maintenance,api-stability,community}/SKILL.md` を作成し、各観点のチェックリスト・判断基準・NG 例を記述する — 5 ファイルとも YAML frontmatter (name / description / allowed-tools) + 本体 (判定基準テーブル + NG 例 + 出力契約) で統一し、`tests/skills-audit.test.ts` で 26 ケースの形式契約を固定
+- [ ] spec-007: `skills/report/zenn-style/SKILL.md` を作成し、レポート文体 (だ/である調 + 比較表 + 見出し構造) のガイドラインを定義する
+- [ ] spec-007: `createAuditAgent()` の `skills` オプションに skills ディレクトリを登録し、StateBackend の下でどのように skill ファイルを供給するか (FilesystemBackend ルーティング or 初期 state への注入) を決定・実装する
+- [ ] spec-007: license-analyzer / security-auditor / その他サブエージェントに対応する skill パスを個別割り当てし、全体 skill のうち必要分だけが流れる配線を作る
+- [ ] spec-007: skills の段階的開示 (関連する SKILL だけがコンテキストに乗る) を決定論的に検証する最小テストを書く

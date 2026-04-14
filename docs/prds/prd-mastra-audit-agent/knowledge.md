@@ -178,6 +178,40 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### Anthropic Skills: system prompt との責務分離と命名契約
+
+spec-007 で導入した Skills (`skills/audit/*/SKILL.md` ほか) は **LLM に渡す知識ベース**という第 3 の層で、コード (動く論理) ともドキュメント (人間向け) とも責務が違う。設計上の要点:
+
+**system prompt と SKILL.md の責務分離**:
+
+| レイヤ | 責務 | 例 |
+|---|---|---|
+| サブエージェント `systemPrompt` | ミッション / 出力契約 / 利用可能ツール / 原則 (常に context に載る短い指示) | "ライセンスの SPDX を特定し /raw/license/result.json に書け" |
+| `SKILL.md` body | 詳細な判定基準 / NG 例 / 出力スキーマのサンプル (必要なときだけ段階的開示) | "Elastic-2.0 は restricted と判定せよ" + NG 例 + JSON サンプル |
+
+system prompt を膨張させずに**「細かい判断ルールは SKILL に逃がす」**のが spec-007 の価値。system prompt は全タスクの毎呼び出しで context に載るのでトークン課金に直結するが、SKILL は LLM が「この skill 要る」と判断したときだけ読み込まれる (progressive disclosure)。
+
+**Anthropic Skills の frontmatter 契約** (deepagents v1.9 の `parseSkillMetadataFromContent` + `validateSkillName$1` で強制される):
+
+1. `name` は **lowercase alphanumeric + 単一ハイフンのみ**。先頭 / 末尾ハイフン禁止、連続 `--` 禁止
+2. `name` は**親ディレクトリ名と完全一致**必須。`skills/audit/license/SKILL.md` なら `name: license`
+3. `description` は必須で 1024 文字以内 (超えると切り捨て)
+4. オプション: `allowed-tools`, `compatibility`, `license`, `metadata`
+
+**tests/skills-audit.test.ts** で 5 ファイル × 5 チェックの 25 ケース + ドリフト検出 1 ケースを固定。deepagents 側でも `validateSkillName$1` が走るが、**外側 (repo 側)** で同じ契約を縛っておくと:
+- ディレクトリリネーム時に skill が silently 読み込み失敗するのを即検出
+- deepagents のバージョンアップで contract が変わったときも自前テストが目印になる
+- SKILL.md 本体が空のスケルトン (`name` / `description` だけで body なし) を弾ける (本体長さ > 200 文字の境界値)
+
+**本プロジェクト固有の SKILL 構造**: 5 つの audit skill は以下の構造で統一している:
+
+1. このスキルを使うタイミング (matching のヒント)
+2. 主要指標 / 判定基準テーブル (表形式)
+3. NG 例 (LLM がハマりがちなミス)
+4. 出力契約 (`/raw/<aspect>/result.json` のサンプル)
+
+この 4 セクション構成で 5 ファイルを量産すると、サブエージェントの system prompt は「スキルに従え」と書くだけで詳細を外に逃がせる。knowledge.md にノウハウを書くのと似た構造だが、**対象読者が人間 (knowledge.md) vs LLM (SKILL.md)** という違いがあり、SKILL.md の方が具体的なテーブルと NG 例を多めに詰める。
+
 ### `fakeModel` の bindTools callIndex 問題と factory-based 回避策
 
 `@langchain/core/testing` の `fakeModel()` で HITL interrupt/resume の E2E を書くとき、**queue ベースの respond/respondWithTools はほぼ確実に壊れる**。原因は `bindTools()` 実装 (`node_modules/@langchain/core/dist/testing/fake_model_builder.js:120-127`):
