@@ -21,6 +21,44 @@
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
+/**
+ * deepagents の仮想 FS に書き込まれたファイルの v1 / v2 両フォーマットを
+ * 正規化して 1 本の string にする pure 関数。
+ *
+ * - v1 (legacy): `content: string[]` — 行の配列。`join("\n")` で復元する
+ * - v2 (current text): `content: string` — そのまま返す
+ * - v2 (binary): `content: Uint8Array` — 監査の raw データは JSON 前提なので
+ *   `TextDecoder` で UTF-8 デコードする (画像などの本物の binary は来ない想定
+ *    だが、来たら呼び出し側の JSON.parse が throw して早期検出できる)
+ *
+ * `deepagents/dist/index.d.ts` L267-301 で FileDataV1 / FileDataV2 型を確認済み。
+ * `isFileDataV1` ヘルパは top-level export されていないので自前で判別する。
+ */
+function normalizeFileContent(fileData: unknown): string {
+  if (fileData === null || typeof fileData !== "object") {
+    throw new Error(
+      `expected FileData object, received ${fileData === null ? "null" : typeof fileData}`,
+    );
+  }
+  const content = (fileData as { content?: unknown }).content;
+  if (Array.isArray(content)) {
+    // v1: `string[]` を改行で復元
+    if (!content.every((line) => typeof line === "string")) {
+      throw new Error("FileDataV1 content array must contain only strings");
+    }
+    return content.join("\n");
+  }
+  if (typeof content === "string") {
+    return content;
+  }
+  if (content instanceof Uint8Array) {
+    return new TextDecoder("utf-8").decode(content);
+  }
+  throw new Error(
+    `unsupported FileData content type: ${typeof content} (expected string[] | string | Uint8Array)`,
+  );
+}
+
 export type AspectRaw = Readonly<Record<string, unknown>>;
 
 export type CriticSeverity = "critical" | "warning" | "info";
@@ -171,4 +209,126 @@ export async function writeAuditReport(
   const body = generateAuditReport(input);
   await mkdir(dirname(outputPath), { recursive: true });
   await writeFile(outputPath, body, "utf8");
+}
+
+/**
+ * 各観点 / critic の raw データ JSON が書き出される仮想 FS 上のパス (spec-004 契約)。
+ *
+ * `AUDIT_SYSTEM_PROMPT` の Phase 1 / Phase 2 の指示と厳密に一致させる必要がある。
+ * ここを変えるときは system prompt 側も同時に直さないと agent が書き出した
+ * raw を reporter が拾えなくなる。
+ */
+export const AUDIT_RAW_PATHS = {
+  license: "/raw/license/result.json",
+  security: "/raw/security/result.json",
+  maintenance: "/raw/maintenance/result.json",
+  apiStability: "/raw/api-stability/result.json",
+  community: "/raw/community/result.json",
+  critic: "/raw/critic/findings.json",
+} as const;
+
+export type ExtractedAuditRaw = Pick<
+  GenerateAuditReportInput,
+  "license" | "security" | "maintenance" | "apiStability" | "community" | "critic"
+>;
+
+/**
+ * `agent.invoke(...)` が返す state から 5 観点の raw データと critic findings を
+ * 抽出する pure 関数 (spec-009)。
+ *
+ * deepagents v1.9 の state は `files?: Record<string, FileData>` を持ち、built-in
+ * `write_file` ツールが書き込んだ内容はここに現れる (`deepagents/dist/index.d.ts`
+ * L679 / L739)。`CompositeBackend` は default 経路を StateBackend に流すので、
+ * `/raw/` プレフィックスのファイルは state 側に来る (routing は `/memories/` /
+ * `/skills/` だけが別 backend にハイジャックされる構成)。
+ *
+ * 抽出方針:
+ *   - 各 raw path を個別に取りに行き、無ければ `null` (reporter 側が "未取得" を
+ *     描画してくれる)
+ *   - JSON parse が失敗した場合は observability のため path 付きで throw。
+ *     これは agent 側の出力契約違反 (JSON Schema 不一致) を即座に検出するための
+ *     load-bearing エラーで、黙って null に落とすと最終レポートが "未取得" だらけ
+ *     になって原因追跡が難しくなる
+ *   - FileData の v1 / v2 / Uint8Array は `normalizeFileContent` に隠蔽
+ *
+ * この関数は pure (副作用なし)。実際のファイル書き出しは `writeAuditReport` に委ねる。
+ * テストは state の shape を配列で与えて決定論的に書ける。
+ */
+export function extractAuditRawFromState(state: unknown): ExtractedAuditRaw {
+  const files = extractFilesRecord(state);
+  return {
+    license: readAspectRaw(files, AUDIT_RAW_PATHS.license),
+    security: readAspectRaw(files, AUDIT_RAW_PATHS.security),
+    maintenance: readAspectRaw(files, AUDIT_RAW_PATHS.maintenance),
+    apiStability: readAspectRaw(files, AUDIT_RAW_PATHS.apiStability),
+    community: readAspectRaw(files, AUDIT_RAW_PATHS.community),
+    critic: readCriticFindings(files, AUDIT_RAW_PATHS.critic),
+  };
+}
+
+function extractFilesRecord(state: unknown): Record<string, unknown> {
+  if (state === null || typeof state !== "object") return {};
+  const files = (state as { files?: unknown }).files;
+  if (files === null || typeof files !== "object") return {};
+  return files as Record<string, unknown>;
+}
+
+function readAspectRaw(
+  files: Record<string, unknown>,
+  path: string,
+): AspectRaw | null {
+  const fileData = files[path];
+  if (fileData === undefined) return null;
+  const raw = normalizeFileContent(fileData);
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+      );
+    }
+    return parsed as AspectRaw;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to parse ${path}: ${message}`);
+  }
+}
+
+function readCriticFindings(
+  files: Record<string, unknown>,
+  path: string,
+): CriticFindings | null {
+  const fileData = files[path];
+  if (fileData === undefined) return null;
+  const raw = normalizeFileContent(fileData);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to parse ${path}: ${message}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+    );
+  }
+  const obj = parsed as Record<string, unknown>;
+  const findings = obj.findings;
+  const overall = obj.overall_assessment;
+  if (!Array.isArray(findings)) {
+    throw new Error(`${path}: "findings" must be an array`);
+  }
+  if (overall !== "pass" && overall !== "warnings" && overall !== "blocked") {
+    throw new Error(
+      `${path}: "overall_assessment" must be one of "pass" | "warnings" | "blocked"`,
+    );
+  }
+  // findings は spec-004 の CriticFinding shape を信頼してそのまま流す。個別の
+  // severity / aspect / message 検証は reporter 側の render 時に型エラーとして
+  // 現れれば十分 (critic サブエージェントの出力契約が妥協点)。
+  return {
+    findings: findings as readonly CriticFinding[],
+    overall_assessment: overall,
+  };
 }

@@ -5,6 +5,8 @@ import {
   buildAuditPrompt,
   parseTargetArg,
   type AgentInvoker,
+  type AuditRunner,
+  type AuditRunResult,
 } from "../src/cli";
 
 function fakeArgv(...args: string[]): string[] {
@@ -78,94 +80,111 @@ describe("runCli", () => {
   });
 
   describe("--target", () => {
-    it("calls the invoker with an audit prompt built from owner/repo", async () => {
-      const invoker: AgentInvoker = vi.fn(async (prompt: string) => `ran: ${prompt}`);
+    const fakeResult: AuditRunResult = {
+      reportPath: "out/mastra-audit-report.md",
+      summary: "監査完了 (3 findings)",
+    };
+
+    it("calls the audit runner with the parsed target and prints the report path", async () => {
+      const auditRunner: AuditRunner = vi.fn(async () => fakeResult);
       const result = await runCli(fakeArgv("--target", "mastra-ai/mastra"), {
-        invoker,
+        auditRunner,
       });
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
-      const receivedPrompt = (invoker as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-      expect(receivedPrompt).toBe(buildAuditPrompt("mastra-ai", "mastra"));
-      expect(result.stdout).toContain("ran:");
-      expect(result.stdout).toContain("mastra-ai/mastra");
+      expect(auditRunner).toHaveBeenCalledWith({
+        owner: "mastra-ai",
+        repo: "mastra",
+      });
+      expect(result.stdout).toContain(
+        "Report written to out/mastra-audit-report.md",
+      );
+      expect(result.stdout).toContain("監査完了 (3 findings)");
     });
 
     it("reports an error when the target value is missing", async () => {
-      const invoker: AgentInvoker = vi.fn();
-      const result = await runCli(fakeArgv("--target"), { invoker });
+      const auditRunner: AuditRunner = vi.fn();
+      const result = await runCli(fakeArgv("--target"), { auditRunner });
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("owner/repo 形式");
-      expect(invoker).not.toHaveBeenCalled();
+      expect(auditRunner).not.toHaveBeenCalled();
     });
 
     it("rejects a target that does not contain exactly one slash", async () => {
-      const invoker: AgentInvoker = vi.fn();
-      const resultNoSlash = await runCli(fakeArgv("--target", "mastra"), { invoker });
+      const auditRunner: AuditRunner = vi.fn();
+      const resultNoSlash = await runCli(fakeArgv("--target", "mastra"), {
+        auditRunner,
+      });
       expect(resultNoSlash.exitCode).toBe(1);
       expect(resultNoSlash.stderr).toContain('"owner/repo" 形式');
 
       const resultTwoSlashes = await runCli(
         fakeArgv("--target", "a/b/c"),
-        { invoker },
+        { auditRunner },
       );
       expect(resultTwoSlashes.exitCode).toBe(1);
       expect(resultTwoSlashes.stderr).toContain('"owner/repo" 形式');
 
-      expect(invoker).not.toHaveBeenCalled();
+      expect(auditRunner).not.toHaveBeenCalled();
     });
 
     it("rejects a target whose owner violates GitHub naming rules", async () => {
-      const invoker: AgentInvoker = vi.fn();
+      const auditRunner: AuditRunner = vi.fn();
       // trailing hyphen — 既存の validateGithubRepoArgs が弾くケースを CLI 経由で確認
-      const result = await runCli(fakeArgv("--target", "bad-/repo"), { invoker });
+      const result = await runCli(fakeArgv("--target", "bad-/repo"), {
+        auditRunner,
+      });
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("owner");
-      expect(invoker).not.toHaveBeenCalled();
+      expect(auditRunner).not.toHaveBeenCalled();
     });
 
     it("rejects a target whose repo violates GitHub naming rules", async () => {
-      const invoker: AgentInvoker = vi.fn();
+      const auditRunner: AuditRunner = vi.fn();
       // 先頭ドット — GitHub の repo 名前規約違反
-      const result = await runCli(fakeArgv("--target", "owner/.repo"), { invoker });
+      const result = await runCli(fakeArgv("--target", "owner/.repo"), {
+        auditRunner,
+      });
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("repo");
-      expect(invoker).not.toHaveBeenCalled();
+      expect(auditRunner).not.toHaveBeenCalled();
     });
 
-    it("errors when no invoker is configured", async () => {
+    it("errors when no auditRunner is configured", async () => {
       const result = await runCli(fakeArgv("--target", "mastra-ai/mastra"));
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("agent invoker is not configured");
+      expect(result.stderr).toContain("audit runner is not configured");
     });
 
-    it("surfaces invoker errors as stderr and exit code 1", async () => {
-      const invoker: AgentInvoker = vi.fn(async () => {
+    it("surfaces auditRunner errors as stderr and exit code 1", async () => {
+      const auditRunner: AuditRunner = vi.fn(async () => {
         throw new Error("boom");
       });
       const result = await runCli(fakeArgv("--target", "mastra-ai/mastra"), {
-        invoker,
+        auditRunner,
       });
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("agent invocation failed: boom");
+      expect(result.stderr).toContain("audit run failed: boom");
     });
 
     it("is mutually exclusive with --invoke", async () => {
       const invoker: AgentInvoker = vi.fn();
+      const auditRunner: AuditRunner = vi.fn();
       const result = await runCli(
         fakeArgv("--target", "mastra-ai/mastra", "--invoke", "hi"),
-        { invoker },
+        { invoker, auditRunner },
       );
 
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain("--invoke と --target は同時に指定できません");
       expect(invoker).not.toHaveBeenCalled();
+      expect(auditRunner).not.toHaveBeenCalled();
     });
   });
 });

@@ -29,8 +29,34 @@ export interface CliResult {
 
 export type AgentInvoker = (prompt: string) => Promise<string>;
 
+/**
+ * `--target <owner/repo>` の実行を担うオーケストレータ (spec-009)。
+ *
+ * `invoker` (任意プロンプト 1 回呼び出し) とは別経路にしたのは 2 つの責務が
+ * 別物だから:
+ *   - `invoker`: 自由プロンプト → 最後のアシスタントメッセージを文字列で返す
+ *   - `auditRunner`: 固定の監査オーケストレーション (agent.invoke + HITL ループ
+ *     + state から `/raw/` 抽出 + `writeAuditReport`) を実行して、生成された
+ *     レポートファイルのパスと短い summary を返す
+ *
+ * run-audit.ts (薄い entry 層) が `realAuditRunner` を実装し、runCli は DI 経由で
+ * 受け取る。テストでは mock auditRunner を渡すことで runCli 側の経路分岐と
+ * エラーハンドリングだけを決定論的に検証できる (実 LLM / reporter 配線は
+ * `tests/audit-pipeline.e2e.test.ts` や本スクリプトの実運用で確認する)。
+ */
+export interface AuditRunResult {
+  readonly reportPath: string;
+  readonly summary: string;
+}
+
+export type AuditRunner = (target: {
+  readonly owner: string;
+  readonly repo: string;
+}) => Promise<AuditRunResult>;
+
 export interface RunCliOptions {
   readonly invoker?: AgentInvoker;
+  readonly auditRunner?: AuditRunner;
 }
 
 /**
@@ -127,23 +153,28 @@ export async function runCli(
         stderr: `error: ${parsed.error}\n`,
       };
     }
-    if (!options.invoker) {
+    if (!options.auditRunner) {
       return {
         exitCode: 1,
         stdout: "",
-        stderr: "error: agent invoker is not configured.\n",
+        stderr: "error: audit runner is not configured.\n",
       };
     }
-    const prompt = buildAuditPrompt(parsed.owner, parsed.repo);
     try {
-      const output = await options.invoker(prompt);
-      return { exitCode: 0, stdout: `${output}\n`, stderr: "" };
+      const result = await options.auditRunner({
+        owner: parsed.owner,
+        repo: parsed.repo,
+      });
+      // stdout は "どのファイルに生成したか" を明示する 1 行 + invoker summary。
+      // CI 等で `out/mastra-audit-report.md` のパスを grep しやすい形で出す。
+      const stdout = `Report written to ${result.reportPath}\n${result.summary}\n`;
+      return { exitCode: 0, stdout, stderr: "" };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
         exitCode: 1,
         stdout: "",
-        stderr: `error: agent invocation failed: ${message}\n`,
+        stderr: `error: audit run failed: ${message}\n`,
       };
     }
   }
