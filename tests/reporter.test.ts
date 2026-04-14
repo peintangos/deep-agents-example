@@ -172,31 +172,33 @@ describe("extractAuditRawFromState", () => {
         ),
       },
     };
-    const extracted = extractAuditRawFromState(state);
-    expect(extracted.license).toEqual({ spdx_id: "MIT" });
-    expect(extracted.security).toEqual({ known_vulnerabilities: [] });
-    expect(extracted.maintenance).toEqual({ release_cadence_days: 14 });
-    expect(extracted.apiStability).toEqual({ semver: "1.x" });
-    expect(extracted.community).toEqual({ stars: 10000 });
-    expect(extracted.critic).toEqual({
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(errors).toEqual([]);
+    expect(data.license).toEqual({ spdx_id: "MIT" });
+    expect(data.security).toEqual({ known_vulnerabilities: [] });
+    expect(data.maintenance).toEqual({ release_cadence_days: 14 });
+    expect(data.apiStability).toEqual({ semver: "1.x" });
+    expect(data.community).toEqual({ stars: 10000 });
+    expect(data.critic).toEqual({
       findings: [],
       overall_assessment: "pass",
     });
   });
 
-  it("returns null for missing raw files without throwing", () => {
+  it("returns null for missing raw files without registering errors", () => {
     const state = {
       files: {
         [AUDIT_RAW_PATHS.license]: fileV2('{"spdx_id":"MIT"}'),
       },
     };
-    const extracted = extractAuditRawFromState(state);
-    expect(extracted.license).toEqual({ spdx_id: "MIT" });
-    expect(extracted.security).toBeNull();
-    expect(extracted.maintenance).toBeNull();
-    expect(extracted.apiStability).toBeNull();
-    expect(extracted.community).toBeNull();
-    expect(extracted.critic).toBeNull();
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(errors).toEqual([]);
+    expect(data.license).toEqual({ spdx_id: "MIT" });
+    expect(data.security).toBeNull();
+    expect(data.maintenance).toBeNull();
+    expect(data.apiStability).toBeNull();
+    expect(data.community).toBeNull();
+    expect(data.critic).toBeNull();
   });
 
   it("normalizes FileData v1 (string[] content) by joining on newlines", () => {
@@ -205,8 +207,8 @@ describe("extractAuditRawFromState", () => {
         [AUDIT_RAW_PATHS.license]: fileV1(['{', '  "spdx_id": "MIT"', "}"]),
       },
     };
-    const extracted = extractAuditRawFromState(state);
-    expect(extracted.license).toEqual({ spdx_id: "MIT" });
+    const { data } = extractAuditRawFromState(state);
+    expect(data.license).toEqual({ spdx_id: "MIT" });
   });
 
   it("normalizes FileData v2 Uint8Array content via UTF-8 decode", () => {
@@ -215,56 +217,62 @@ describe("extractAuditRawFromState", () => {
         [AUDIT_RAW_PATHS.license]: fileV2Binary('{"spdx_id":"MIT"}'),
       },
     };
-    const extracted = extractAuditRawFromState(state);
-    expect(extracted.license).toEqual({ spdx_id: "MIT" });
+    const { data } = extractAuditRawFromState(state);
+    expect(data.license).toEqual({ spdx_id: "MIT" });
   });
 
   it("returns empty (all null) when state has no files key", () => {
-    const extracted = extractAuditRawFromState({ messages: [] });
-    expect(extracted.license).toBeNull();
-    expect(extracted.critic).toBeNull();
+    const { data, errors } = extractAuditRawFromState({ messages: [] });
+    expect(errors).toEqual([]);
+    expect(data.license).toBeNull();
+    expect(data.critic).toBeNull();
   });
 
   it("returns empty (all null) when state is null or primitive", () => {
-    expect(extractAuditRawFromState(null).license).toBeNull();
-    expect(extractAuditRawFromState("nope").license).toBeNull();
-    expect(extractAuditRawFromState(undefined).license).toBeNull();
+    expect(extractAuditRawFromState(null).data.license).toBeNull();
+    expect(extractAuditRawFromState("nope").data.license).toBeNull();
+    expect(extractAuditRawFromState(undefined).data.license).toBeNull();
   });
 
-  it("throws with path context when an aspect raw is invalid JSON", () => {
+  it("records an error with the rawString when an aspect raw is invalid JSON", () => {
     const state = {
       files: {
         [AUDIT_RAW_PATHS.license]: fileV2("this is not json"),
       },
     };
-    expect(() => extractAuditRawFromState(state)).toThrow(
-      /\/raw\/license\/result\.json/,
-    );
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.license).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.path).toBe("/raw/license/result.json");
+    expect(errors[0]?.error).toMatch(/failed to parse/);
+    expect(errors[0]?.rawString).toBe("this is not json");
   });
 
-  it("throws when an aspect raw is a JSON array (object required)", () => {
+  it("records an error when an aspect raw is a JSON array (object required)", () => {
     const state = {
       files: {
         [AUDIT_RAW_PATHS.security]: fileV2("[1, 2, 3]"),
       },
     };
-    expect(() => extractAuditRawFromState(state)).toThrow(
-      /\/raw\/security\/result\.json.*expected an object.*received array/,
-    );
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.security).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.error).toMatch(/expected an object.*received array/);
   });
 
-  it("throws when critic JSON is missing findings array", () => {
+  it("records an error when critic JSON is missing findings array", () => {
     const state = {
       files: {
         [AUDIT_RAW_PATHS.critic]: fileV2('{"overall_assessment":"pass"}'),
       },
     };
-    expect(() => extractAuditRawFromState(state)).toThrow(
-      /findings.*array/,
-    );
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.critic).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.error).toMatch(/findings.*array/);
   });
 
-  it("throws when critic overall_assessment has an unexpected value", () => {
+  it("records an error when critic overall_assessment has an unexpected value", () => {
     const state = {
       files: {
         [AUDIT_RAW_PATHS.critic]: fileV2(
@@ -272,9 +280,53 @@ describe("extractAuditRawFromState", () => {
         ),
       },
     };
-    expect(() => extractAuditRawFromState(state)).toThrow(
-      /overall_assessment/,
-    );
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.critic).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.error).toMatch(/overall_assessment/);
+  });
+
+  it("returns partial data when only critic is malformed (robustness guarantee)", () => {
+    // spec-009 first-run failure mode: all 5 aspect raws valid, critic malformed.
+    // Previous throw-based design lost the entire report; now we should get 5
+    // valid aspects + null critic + 1 error entry pointing at critic.
+    const state = {
+      files: {
+        [AUDIT_RAW_PATHS.license]: fileV2('{"spdx_id":"MIT"}'),
+        [AUDIT_RAW_PATHS.security]: fileV2('{"known_vulnerabilities":[]}'),
+        [AUDIT_RAW_PATHS.maintenance]: fileV2('{"release_cadence_days":14}'),
+        [AUDIT_RAW_PATHS.apiStability]: fileV2('{"semver":"1.x"}'),
+        [AUDIT_RAW_PATHS.community]: fileV2('{"stars":10000}'),
+        [AUDIT_RAW_PATHS.critic]: fileV2('{"findings":[{"severity":"warning"' ),
+      },
+    };
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.license).not.toBeNull();
+    expect(data.security).not.toBeNull();
+    expect(data.maintenance).not.toBeNull();
+    expect(data.apiStability).not.toBeNull();
+    expect(data.community).not.toBeNull();
+    expect(data.critic).toBeNull();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.path).toBe("/raw/critic/findings.json");
+  });
+
+  it("accumulates multiple errors when several raws are malformed", () => {
+    const state = {
+      files: {
+        [AUDIT_RAW_PATHS.license]: fileV2("not json"),
+        [AUDIT_RAW_PATHS.security]: fileV2("[1]"),
+        [AUDIT_RAW_PATHS.maintenance]: fileV2('{"ok":true}'),
+      },
+    };
+    const { data, errors } = extractAuditRawFromState(state);
+    expect(data.license).toBeNull();
+    expect(data.security).toBeNull();
+    expect(data.maintenance).toEqual({ ok: true });
+    expect(errors.map((e) => e.path)).toEqual([
+      "/raw/license/result.json",
+      "/raw/security/result.json",
+    ]);
   });
 
   it("feeds cleanly into generateAuditReport (integration with pure reporter)", () => {
@@ -286,11 +338,11 @@ describe("extractAuditRawFromState", () => {
         ),
       },
     };
-    const extracted = extractAuditRawFromState(state);
+    const { data } = extractAuditRawFromState(state);
     const report = generateAuditReport({
       target: { owner: "mastra-ai", repo: "mastra" },
       generatedAt: "2026-04-14T10:00:00Z",
-      ...extracted,
+      ...data,
     });
     expect(report).toContain("# mastra-ai/mastra 監査レポート");
     expect(report).toContain('"spdx_id": "Elastic-2.0"');

@@ -233,6 +233,25 @@ export type ExtractedAuditRaw = Pick<
 >;
 
 /**
+ * `extractAuditRawFromState` が 1 つの raw ファイルで失敗した時に返すエラー情報。
+ *
+ * `rawString` は元の FileData を正規化した後の文字列で、オーケストレーション層が
+ * `out/.state/last-run/` にダンプして目視デバッグできるようにするためのもの。
+ * raw が見つからなかった (undefined) ケースはエラーではなく `null` 扱いにする
+ * ので、errors 配列には入らない。
+ */
+export interface AuditRawExtractionError {
+  readonly path: string;
+  readonly error: string;
+  readonly rawString: string | null;
+}
+
+export interface ExtractedAuditRawResult {
+  readonly data: ExtractedAuditRaw;
+  readonly errors: readonly AuditRawExtractionError[];
+}
+
+/**
  * `agent.invoke(...)` が返す state から 5 観点の raw データと critic findings を
  * 抽出する pure 関数 (spec-009)。
  *
@@ -242,28 +261,33 @@ export type ExtractedAuditRaw = Pick<
  * `/raw/` プレフィックスのファイルは state 側に来る (routing は `/memories/` /
  * `/skills/` だけが別 backend にハイジャックされる構成)。
  *
- * 抽出方針:
- *   - 各 raw path を個別に取りに行き、無ければ `null` (reporter 側が "未取得" を
- *     描画してくれる)
- *   - JSON parse が失敗した場合は observability のため path 付きで throw。
- *     これは agent 側の出力契約違反 (JSON Schema 不一致) を即座に検出するための
- *     load-bearing エラーで、黙って null に落とすと最終レポートが "未取得" だらけ
- *     になって原因追跡が難しくなる
- *   - FileData の v1 / v2 / Uint8Array は `normalizeFileContent` に隠蔽
+ * 抽出方針 (spec-009 初回ランでの失敗経験を反映):
+ *   - 各 raw path を個別に取りに行き、見つからなければ `data.<field>=null`
+ *     (エラーには**しない**。reporter 側が "未取得" プレースホルダを描画)
+ *   - JSON parse や shape 検証で失敗した場合は **errors 配列に詰めるだけ** で
+ *     data 側は null にする。throw しない。これにより **critic だけ壊れていても
+ *     license/security のレポートは出る** という partial recovery が可能になる
+ *   - FileData の v1 / v2 / Uint8Array は `normalizeFileContent` に隠蔽。
+ *     `normalizeFileContent` は throw するがそれも catch してエラー化する
  *
- * この関数は pure (副作用なし)。実際のファイル書き出しは `writeAuditReport` に委ねる。
- * テストは state の shape を配列で与えて決定論的に書ける。
+ * この関数は pure (副作用なし)。オーケストレーション層が errors を見て stderr に
+ * 警告を出したり、state.files を `out/.state/last-run/` にダンプしたりする責務を
+ * 負う (run-audit.ts 側の責任)。
  */
-export function extractAuditRawFromState(state: unknown): ExtractedAuditRaw {
+export function extractAuditRawFromState(
+  state: unknown,
+): ExtractedAuditRawResult {
   const files = extractFilesRecord(state);
-  return {
-    license: readAspectRaw(files, AUDIT_RAW_PATHS.license),
-    security: readAspectRaw(files, AUDIT_RAW_PATHS.security),
-    maintenance: readAspectRaw(files, AUDIT_RAW_PATHS.maintenance),
-    apiStability: readAspectRaw(files, AUDIT_RAW_PATHS.apiStability),
-    community: readAspectRaw(files, AUDIT_RAW_PATHS.community),
-    critic: readCriticFindings(files, AUDIT_RAW_PATHS.critic),
+  const errors: AuditRawExtractionError[] = [];
+  const data: ExtractedAuditRaw = {
+    license: readAspectRaw(files, AUDIT_RAW_PATHS.license, errors),
+    security: readAspectRaw(files, AUDIT_RAW_PATHS.security, errors),
+    maintenance: readAspectRaw(files, AUDIT_RAW_PATHS.maintenance, errors),
+    apiStability: readAspectRaw(files, AUDIT_RAW_PATHS.apiStability, errors),
+    community: readAspectRaw(files, AUDIT_RAW_PATHS.community, errors),
+    critic: readCriticFindings(files, AUDIT_RAW_PATHS.critic, errors),
   };
+  return { data, errors };
 }
 
 function extractFilesRecord(state: unknown): Record<string, unknown> {
@@ -273,60 +297,115 @@ function extractFilesRecord(state: unknown): Record<string, unknown> {
   return files as Record<string, unknown>;
 }
 
+function safeNormalize(fileData: unknown): string | null {
+  try {
+    return normalizeFileContent(fileData);
+  } catch {
+    return null;
+  }
+}
+
 function readAspectRaw(
   files: Record<string, unknown>,
   path: string,
+  errors: AuditRawExtractionError[],
 ): AspectRaw | null {
   const fileData = files[path];
   if (fileData === undefined) return null;
-  const raw = normalizeFileContent(fileData);
+  const raw = safeNormalize(fileData);
+  if (raw === null) {
+    try {
+      normalizeFileContent(fileData);
+    } catch (error) {
+      errors.push({
+        path,
+        error: error instanceof Error ? error.message : String(error),
+        rawString: null,
+      });
+    }
+    return null;
+  }
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      throw new Error(
-        `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
-      );
+      errors.push({
+        path,
+        error: `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+        rawString: raw,
+      });
+      return null;
     }
     return parsed as AspectRaw;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`failed to parse ${path}: ${message}`);
+    errors.push({
+      path,
+      error: `failed to parse ${path}: ${message}`,
+      rawString: raw,
+    });
+    return null;
   }
 }
 
 function readCriticFindings(
   files: Record<string, unknown>,
   path: string,
+  errors: AuditRawExtractionError[],
 ): CriticFindings | null {
   const fileData = files[path];
   if (fileData === undefined) return null;
-  const raw = normalizeFileContent(fileData);
+  const raw = safeNormalize(fileData);
+  if (raw === null) {
+    try {
+      normalizeFileContent(fileData);
+    } catch (error) {
+      errors.push({
+        path,
+        error: error instanceof Error ? error.message : String(error),
+        rawString: null,
+      });
+    }
+    return null;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`failed to parse ${path}: ${message}`);
+    errors.push({
+      path,
+      error: `failed to parse ${path}: ${message}`,
+      rawString: raw,
+    });
+    return null;
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(
-      `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
-    );
+    errors.push({
+      path,
+      error: `expected an object at ${path}, received ${Array.isArray(parsed) ? "array" : typeof parsed}`,
+      rawString: raw,
+    });
+    return null;
   }
   const obj = parsed as Record<string, unknown>;
   const findings = obj.findings;
   const overall = obj.overall_assessment;
   if (!Array.isArray(findings)) {
-    throw new Error(`${path}: "findings" must be an array`);
+    errors.push({
+      path,
+      error: `${path}: "findings" must be an array`,
+      rawString: raw,
+    });
+    return null;
   }
   if (overall !== "pass" && overall !== "warnings" && overall !== "blocked") {
-    throw new Error(
-      `${path}: "overall_assessment" must be one of "pass" | "warnings" | "blocked"`,
-    );
+    errors.push({
+      path,
+      error: `${path}: "overall_assessment" must be one of "pass" | "warnings" | "blocked"`,
+      rawString: raw,
+    });
+    return null;
   }
-  // findings は spec-004 の CriticFinding shape を信頼してそのまま流す。個別の
-  // severity / aspect / message 検証は reporter 側の render 時に型エラーとして
-  // 現れれば十分 (critic サブエージェントの出力契約が妥協点)。
   return {
     findings: findings as readonly CriticFinding[],
     overall_assessment: overall,

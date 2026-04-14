@@ -2,6 +2,8 @@ import "dotenv/config";
 import process, { stdin, stdout } from "node:process";
 import readline from "node:readline/promises";
 import { randomUUID } from "node:crypto";
+import { writeFile, mkdir } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { Command } from "@langchain/langgraph";
 import type {
   ActionRequest,
@@ -48,6 +50,17 @@ const MAX_HITL_ITERATIONS = 20;
  * されており、他ターゲットで実行する場合も最新結果を同じパスに上書きする)。
  */
 const DEFAULT_REPORT_PATH = "out/mastra-audit-report.md";
+
+/**
+ * 直近ランで agent が書き出した `/raw/*` ファイルを保存するディレクトリ。
+ *
+ * spec-009 の初回ランで critic の JSON が 1 文字違いで壊れて全レポートが
+ * 生成されないケースを踏んだので、**抽出の前に state.files の `/raw/*` を
+ * そのまま disk にダンプする** 運用にした。次回ラン以降はここを覗けば
+ * agent の生出力を目視デバッグできる。既存のダンプは毎ラン上書きされる
+ * (履歴は git で取る)。
+ */
+const LAST_RUN_DUMP_DIR = "out/.state/last-run";
 
 /**
  * 対話型 HITL policy: 標準入出力で承認/却下をユーザーに尋ねる。副作用を伴うため
@@ -151,45 +164,125 @@ const realInvoker: AgentInvoker = async (prompt) => {
 };
 
 /**
+ * state.files の `/raw/*` プレフィックスのファイルをそのまま disk にダンプする。
+ *
+ * 目的は 2 つ:
+ *   1. critic の JSON が 1 文字壊れているようなケースで agent の生出力を
+ *      オフラインで検証できるようにする
+ *   2. 次回ラン前にここを覗けば前回何が起きたか目視で診断できる
+ *
+ * `normalizeFileContent` を使いたいところだが reporter に private なので、
+ * ここでは v1/v2/binary の 3 分岐を自前で処理する (薄いデバッグコードなので
+ * ここに閉じた最小実装で良い)。parse せず生の string をそのまま保存する。
+ */
+async function dumpAuditRawFiles(
+  state: unknown,
+  outputDir: string,
+): Promise<string[]> {
+  if (state === null || typeof state !== "object") return [];
+  const files = (state as { files?: unknown }).files;
+  if (files === null || typeof files !== "object") return [];
+
+  const filesRecord = files as Record<string, unknown>;
+  const dumped: string[] = [];
+
+  for (const [path, fileData] of Object.entries(filesRecord)) {
+    if (!path.startsWith("/raw/")) continue;
+    if (fileData === null || typeof fileData !== "object") continue;
+    const content = (fileData as { content?: unknown }).content;
+
+    let rawString: string;
+    if (Array.isArray(content)) {
+      rawString = content.join("\n");
+    } else if (typeof content === "string") {
+      rawString = content;
+    } else if (content instanceof Uint8Array) {
+      rawString = new TextDecoder("utf-8").decode(content);
+    } else {
+      // unknown shape — JSON.stringify としてダンプする (後で目視で原因追えるように)
+      rawString = JSON.stringify(fileData, null, 2);
+    }
+
+    // `path` は `/raw/license/result.json` なので先頭 `/` を落として join
+    const outPath = join(outputDir, path.replace(/^\//, ""));
+    await mkdir(dirname(outPath), { recursive: true });
+    await writeFile(outPath, rawString, "utf8");
+    dumped.push(outPath);
+  }
+
+  return dumped;
+}
+
+/**
  * --target の実 auditRunner (spec-009)。
  *
  * 1. `buildAuditPrompt` で固定の監査プロンプトを組み立て
  * 2. `invokeWithHitlLoop` で agent を走らせて最終 state を取る
- * 3. `extractAuditRawFromState` で `/raw/<aspect>/result.json` と critic findings を JSON パース
- * 4. `writeAuditReport` で `out/mastra-audit-report.md` に Markdown を書き出す
- * 5. findings 数を入れた短い summary と report path を返す
+ * 3. **`dumpAuditRawFiles` で state の `/raw/*` を disk にそのまま保存**
+ *    (抽出失敗時に agent の生出力を失わないための安全網)
+ * 4. `extractAuditRawFromState` で 5 観点 + critic を JSON パース
+ *    (per-field エラーは data.<field>=null にして errors[] に詰まる)
+ * 5. errors があれば stderr に警告を出す (どの path がなぜ壊れたか + dump path)
+ * 6. `writeAuditReport` でレポートを書き出す (壊れた raw は "未取得" プレースホルダに)
+ * 7. summary を返す (成功数とエラー数を含める)
  *
- * critic 未実行や一部 raw 欠落のケースでも失敗させず、reporter が "未取得"
- * プレースホルダで埋めたレポートを出力する (agent 側の不具合を人間が目視で
- * 検出しやすくするため)。
+ * critic 未実行や一部 raw の JSON 不正のケースでも **決して throw せず**、
+ * 取れる範囲のレポートを生成する。これは spec-009 初回ランで critic の JSON が
+ * 1 文字壊れただけで全レポートがゼロになる失敗モードへの対応。
  */
 const realAuditRunner: AuditRunner = async (target) => {
   const prompt = buildAuditPrompt(target.owner, target.repo);
   const { state } = await invokeWithHitlLoop(prompt);
 
-  const extracted = extractAuditRawFromState(state);
-  const generatedAt = new Date().toISOString();
+  const dumpedPaths = await dumpAuditRawFiles(state, LAST_RUN_DUMP_DIR);
+  if (dumpedPaths.length > 0) {
+    process.stderr.write(
+      `\n[dump] agent が書き出した raw ファイル ${dumpedPaths.length} 件を ${LAST_RUN_DUMP_DIR}/ 配下に保存しました\n`,
+    );
+  } else {
+    process.stderr.write(
+      `\n[dump] state.files に /raw/ プレフィックスのファイルが見つかりませんでした (agent が raw を書き出していない可能性)\n`,
+    );
+  }
 
+  const { data, errors } = extractAuditRawFromState(state);
+  if (errors.length > 0) {
+    process.stderr.write(
+      `\n[warn] raw ファイルの抽出で ${errors.length} 件のエラーが発生しました (部分レポートを生成します)\n`,
+    );
+    for (const err of errors) {
+      process.stderr.write(`  - ${err.path}: ${err.error}\n`);
+    }
+  }
+
+  const generatedAt = new Date().toISOString();
   await writeAuditReport(
     {
       target,
       generatedAt,
-      ...extracted,
+      ...data,
     },
     DEFAULT_REPORT_PATH,
   );
 
   return {
     reportPath: DEFAULT_REPORT_PATH,
-    summary: buildSummary(extracted.critic),
+    summary: buildSummary(data.critic, errors.length),
   };
 };
 
-function buildSummary(critic: CriticFindings | null): string {
+function buildSummary(
+  critic: CriticFindings | null,
+  extractionErrorCount: number,
+): string {
+  const errorNote =
+    extractionErrorCount > 0
+      ? ` [extraction errors: ${extractionErrorCount}, see ${LAST_RUN_DUMP_DIR}/]`
+      : "";
   if (!critic) {
-    return "監査完了 (critic 未実行 — raw データのみで中間レポートを生成)";
+    return `監査完了 (critic 未取得 — 中間レポートを生成)${errorNote}`;
   }
-  return `監査完了 (overall=${critic.overall_assessment}, findings=${critic.findings.length})`;
+  return `監査完了 (overall=${critic.overall_assessment}, findings=${critic.findings.length})${errorNote}`;
 }
 
 const result = await runCli(process.argv, {
