@@ -37,7 +37,7 @@ Feature: Middleware がツール呼び出しを横断的に処理する
 ## Implementation Steps
 
 - [x] `src/middleware/logging.ts` でツール呼び出しロギング middleware を実装 — langchain の `createMiddleware({ wrapToolCall })` ベース。pure event builder (`buildToolCallLogEvent`) / JSONL 形式化 (`formatToolCallEventLine`) / file sink ラッパ (`createFileToolCallLogSink` + `appendToolCallEvents`) / middleware 本体 (`createToolCallLoggingMiddleware`) の 4 層分離。sink を DI にしてテストは in-memory array で決定論化。失敗時は sink に記録後 `throw` を rethrow してエージェントを欺かない。tests/middleware/logging.test.ts で 13 ケース (pure 4 + format 2 + file I/O 3 + E2E 4)
-- [ ] `src/middleware/rate-limit.ts` で GitHub API レート制限対応 middleware を実装
+- [x] `src/middleware/rate-limit.ts` で GitHub API レート制限対応 middleware を実装 — min-interval 方式 (response header 非依存) で `DEFAULT_GITHUB_MIN_INTERVAL_MS=700` を固定、`fetch_github` をデフォルト対象に。pure `computeSleepMs` (null / elapsed≥interval / elapsed<interval / clock-skew cap の 4 分岐) + middleware factory (`now` / `sleep` を DI) の 2 層分離。tests/middleware/rate-limit.test.ts で 11 ケース (pure 4 + middleware 5 + exports 2)
 - [ ] `src/middleware/validate.ts` で引数バリデーション middleware を実装
 - [ ] `createDeepAgent()` の `middleware` オプションに登録
 - [ ] テスト: 各 middleware が期待通りに wrap することを確認
