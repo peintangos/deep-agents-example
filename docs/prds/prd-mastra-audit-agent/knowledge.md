@@ -456,6 +456,7 @@ scripts/run-audit.ts にロジックを書くと、`import` した瞬間に `pro
 - GitHub API を呼ぶサブエージェントは `GITHUB_TOKEN` を環境変数経由で受け取り、Middleware で最小限のレート制限緩和を行う。
 - **ESM / モジュール解決**: `tsconfig.json` は `module: ESNext` + `moduleResolution: bundler` を採用。vitest (Vite 基盤) は拡張子なし / `.js` 拡張子の import 両方を解決できる。`package.json` に `"type": "module"` は付けていないが、`tsx scripts/run-audit.ts` 実行時に問題が出たら追加を検討する。
 - `deepagents` の transitive import で `langsmith/experimental/sandbox is in alpha` という stderr 警告が出るが、API を使っていないため無視してよい。
+- **SKILL.md の形式契約は audit / report で共通**: `skills/audit/*` と `skills/report/*` はカテゴリこそ違うが、同じ frontmatter 契約 (`name` = 親ディレクトリ名 / `description` 非空 / `allowed-tools` リスト) と同じ本体契約 (`# ` トップレベル見出し + 実質 200 文字超) を共有する。テストは `tests/skills-{audit,report}.test.ts` に分けているが、`parseFrontmatter` の行ベース実装は 2 ファイルに同一コピー。3 カテゴリ目が出てきたら `tests/_helpers/` に共通ヘルパを抽出するのが筋。配線タスクで deepagents の `validateSkillName` 相当チェックが動いても、この契約を守る限り落ちない前提で設計している。
 
 ## Gotchas
 

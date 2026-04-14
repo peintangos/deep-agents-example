@@ -37,7 +37,7 @@ Feature: Skills が段階的開示で読み込まれる
 ## Implementation Steps
 
 - [x] `skills/audit/` 配下に 5 観点分の SKILL.md を作成（詳細チェックリスト） — `license` / `security` / `maintenance` / `api-stability` / `community` の 5 ファイル。YAML frontmatter (name = directory 名, description, allowed-tools) + 本体 (判定基準テーブル + NG 例 + 出力契約) で統一。`tests/skills-audit.test.ts` で 26 ケース format 契約
-- [ ] `skills/report/zenn-style/SKILL.md` で文体ガイドラインを定義
+- [x] `skills/report/zenn-style/SKILL.md` で文体ガイドラインを定義 — だ/である調 / 結論→根拠→含意 / 見出し構造 (`###` 3 段構成) / 総合判定テーブルテンプレ / critic findings の書き換えルール / 5 条件の出力契約を定義。`tests/skills-report.test.ts` で形式契約 5 + zenn-style 固有の内容契約 3 (だ/である調の言及 / Markdown table 構文 / `###` 見出し言及) を固定 (9 ケース)
 - [ ] `createDeepAgent()` の `skills` オプションに Skills ディレクトリを登録
 - [ ] サブエージェントにも必要な Skills を個別割り当て
 - [ ] テスト: 関連性マッチングで正しい Skill が読み込まれることを確認
