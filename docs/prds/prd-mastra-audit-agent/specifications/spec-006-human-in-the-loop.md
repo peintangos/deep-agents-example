@@ -36,7 +36,7 @@ Feature: 特定ツールの実行前に人間の承認を挟む
 
 ## Implementation Steps
 
-- [ ] `createDeepAgent()` に `checkpointer` (`InMemorySaver`) と `interrupt_on` を追加
+- [x] `createDeepAgent()` に `checkpointer` (`MemorySaver` — TS では `InMemorySaver` ではなく `MemorySaver` が正しい名称) と `interruptOn` を追加 (`src/agent.ts` の `CreateAuditAgentOptions` に両方を optional 注入できる DI パターンを確立、デフォルトで `fetch_github` + `query_osv` に承認を要求、`write_file` は `/raw/` への書き込みと衝突するため除外)
 - [ ] CLI 側で中断を検出してプロンプトを出し、ユーザー入力を `Command(resume=...)` に変換するハンドラを実装
 - [ ] 承認 / 却下のログを `/raw/hitl/log.jsonl` に残す
 - [ ] テスト: interrupt → resume の E2E 流れ

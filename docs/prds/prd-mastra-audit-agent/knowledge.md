@@ -178,6 +178,33 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### HITL 配線 (checkpointer + interruptOn) のツール選定基準
+
+spec-006 の最初のタスクで `createAuditAgent()` に `checkpointer` (`MemorySaver`) と `interruptOn` を追加した。v1.9 の `humanInTheLoopMiddleware` は **ツール名単位** で interrupt を発火するため、**引数 (パス) でフィルタできない**。この制約を知らずに `write_file` を interrupt 対象に入れると、各サブエージェントが `/raw/<aspect>/result.json` を書くたびに中断がかかり、監査が事実上進まなくなる。
+
+判定基準:
+
+1. **外部副作用を伴うツールだけを対象にする**: レート制限を消費したり、外部サービスに記録を残したりするツール (`fetch_github`, `query_osv`) が本命。built-in の `read_file` / `write_file` / `edit_file` は「内部的にスクラッチ領域に書く」用途でも大量に呼ばれるので、一律 interrupt 対象にすると機能しない
+2. **"特定のパスだけ interrupt したい" は middleware ではなく orchestrator の責務に回す**: 最終レポート (`/reports/`) や長期メモリ (`/memories/`) への書き込みは、agent のツール呼び出しではなく orchestrator (CLI / `writeAuditReport` / memory helper) 経由で行う設計 (spec-004 / spec-005 で確立済み)。したがって HITL を効かせるべき層も orchestrator 側で、agent の `interruptOn` には入れない
+3. **`interruptOn: {}` を渡すと実質 no-op** になる。HITL をテストで無効化したいときの escape hatch として使える (smoke test での `createAuditAgent({ interruptOn: {} })` 参照)
+
+**v1.9 の API 名前付けに関する注意**: Python 版 deepagents / LangGraph の `InMemorySaver` は、TS 版では `MemorySaver` (from `@langchain/langgraph-checkpoint`) が正式名称。spec-006 の本文に書かれていた `InMemorySaver` は Python 版の表記で、TS 側の実装では **`MemorySaver` に読み替える**。spec-005 の `use_longterm_memory: true` と同じ「Python 由来の表記を v1.9 に合わせる」パターンの再発。
+
+**`InterruptOnConfig` は `allowedDecisions` + `description` を明示する**:
+
+\`\`\`ts
+{
+  allowedDecisions: ["approve", "reject"],  // "edit" を入れるなら argsSchema も必要
+  description: "GitHub API 呼び出しは認証トークンのレート制限を消費します。実行を許可しますか?",
+}
+\`\`\`
+
+- `true` のかわりに `InterruptOnConfig` を渡すと、human-facing なメッセージが **ツールごとに違う文言** になり、承認する人間が「何を承認しているか」を把握しやすい
+- `allowedDecisions` に `"edit"` を入れると `argsSchema` (JSON Schema) が必要になる。今回は approve / reject の 2 択に絞ったので不要
+- `description` は日本語で書く。smoke test で CJK 文字の混入を assert しておくと、将来英語で上書きされたときに気付ける
+
+**`checkpointer` は `interruptOn` と不可分**: interrupt して resume するためには中断時点の state を保存する checkpointer が必須。両方を DI で optional 注入できるようにし、**デフォルトで常に配線しておく**のが安全 (`interruptOn: {}` で中断自体は止められるので、checkpointer のオーバーヘッドは許容)。`store` / `checkpointer` / `interruptOn` の 3 つの optional 注入口を同じ DI パターンに揃えることで、テストでは「HITL 無効化したいときだけ空オブジェクトを渡す」の 1 行で制御できる。
+
 ### `CompositeBackend` の prefix 配線を LLM なしで決定論的にテストする (legacy mode)
 
 spec-005 で `/memories/` → `StoreBackend` の prefix ルーティングが本当に効いているかを検証したいが、`createAuditAgent({ store }).invoke(...)` は LLM 呼び出しを伴うので決定論的ではない。**`StoreBackend` / `StateBackend` の legacy mode** を使うと、LangGraph 実行コンテキスト (`getStore()`) なしでもテストから同じ配線を組める。

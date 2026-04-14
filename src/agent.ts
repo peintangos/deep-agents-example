@@ -6,8 +6,12 @@ import {
   StateBackend,
   StoreBackend,
 } from "deepagents";
-import { InMemoryStore } from "@langchain/langgraph-checkpoint";
-import type { BaseStore } from "@langchain/langgraph-checkpoint";
+import type { InterruptOnConfig } from "langchain";
+import { InMemoryStore, MemorySaver } from "@langchain/langgraph-checkpoint";
+import type {
+  BaseCheckpointSaver,
+  BaseStore,
+} from "@langchain/langgraph-checkpoint";
 import { createLicenseAnalyzerSubAgent } from "./subagents/license-analyzer";
 import { createSecurityAuditorSubAgent } from "./subagents/security-auditor";
 import { createMaintenanceHealthSubAgent } from "./subagents/maintenance-health";
@@ -102,6 +106,36 @@ export function createLlm(): BaseChatModel {
 }
 
 /**
+ * HITL (Human-in-the-Loop) 承認対象のツール。
+ *
+ * deepagents / langchain の `humanInTheLoopMiddleware` は `interruptOn` に
+ * 書かれたツール名に一致する tool call を実行前に中断し、人間の承認を待つ。
+ * ここでは **外部 API を叩くツール 2 つだけ** を対象にしている:
+ *
+ *   - `fetch_github`: GitHub API を叩くとレート制限を消費する
+ *   - `query_osv`: OSV 脆弱性 DB への問い合わせ
+ *
+ * built-in の `write_file` は対象に入れない: agent は `/raw/<aspect>/result.json`
+ * にも `write_file` で書き込むため、write_file 全てを中断すると監査が進まなくなる。
+ * 仕様で言及された「最終レポート書き込み」「`/memories/` 書き込み」は
+ * オーケストレーション層 (CLI / reporter / memory helper) の責務であり、agent の
+ * tool としては発火しないので interruptOn で絡める必要がない (spec-005 の責務境界と
+ * 同じ方針)。
+ */
+export const DEFAULT_INTERRUPT_ON: Record<string, InterruptOnConfig> = {
+  fetch_github: {
+    allowedDecisions: ["approve", "reject"],
+    description:
+      "GitHub API 呼び出しは認証トークンのレート制限を消費します。実行を許可しますか?",
+  },
+  query_osv: {
+    allowedDecisions: ["approve", "reject"],
+    description:
+      "OSV 脆弱性データベースへの問い合わせです。実行を許可しますか?",
+  },
+};
+
+/**
  * `createAuditAgent` へのオプション。
  */
 export interface CreateAuditAgentOptions {
@@ -122,10 +156,34 @@ export interface CreateAuditAgentOptions {
    * `BaseStore` 実装を差し替える想定。
    */
   readonly store?: BaseStore;
+
+  /**
+   * LangGraph の checkpointer。HITL で interrupt → resume するためには
+   * checkpointer が必須 (中断時点の state を保存するのに使う)。
+   *
+   * 省略時はプロセスローカルな `MemorySaver` が自動生成される。プロダクションで
+   * 永続化したい場合は SQLite / Postgres などディスク裏打ちの
+   * `BaseCheckpointSaver` 実装に差し替える想定。`store` と同じ DI パターンに
+   * 揃えてあるため、テストでは明示的に `new MemorySaver()` を渡して分離できる。
+   */
+  readonly checkpointer?: BaseCheckpointSaver;
+
+  /**
+   * HITL で承認を要求するツール設定。キーはツール名、値は
+   * `langchain` の `InterruptOnConfig` (承認可能な判断の種類 / 説明文など)。
+   *
+   * 省略時は {@link DEFAULT_INTERRUPT_ON} (fetch_github + query_osv) が適用される。
+   * 空オブジェクト `{}` を渡すと全ツール auto-approve になる (=実質 HITL 無効化)
+   * ため、HITL を使わないテストでは `{}` を明示することで checkpointer 配線だけを
+   * 検証できる。
+   */
+  readonly interruptOn?: Record<string, InterruptOnConfig>;
 }
 
 export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
   const store = options.store ?? new InMemoryStore();
+  const checkpointer = options.checkpointer ?? new MemorySaver();
+  const interruptOn = options.interruptOn ?? DEFAULT_INTERRUPT_ON;
   return createDeepAgent({
     model: createLlm(),
     systemPrompt: AUDIT_SYSTEM_PROMPT,
@@ -151,5 +209,19 @@ export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
       new CompositeBackend(new StateBackend(config), {
         "/memories/": new StoreBackend(),
       }),
+    /**
+     * HITL (spec-006) のために checkpointer と interruptOn を配線する。
+     * interruptOn に指定したツール名の tool call が発生すると、deepagents は
+     * `humanInTheLoopMiddleware` 経由で実行を中断し、呼び出し元に
+     * `result.__interrupt__` を返す。呼び出し側は `Command({ resume })` で
+     * 承認・却下を返すことで実行を再開できる。
+     *
+     * checkpointer が無いと interrupt 前後で state を保てないので、interruptOn を
+     * 使うなら checkpointer は必須。両方をここで常に渡しているのは、将来 HITL を
+     * 無効化したいときでも `interruptOn: {}` を渡せば実質 no-op になり、配線を
+     * 削る必要が無いため (checkpointer 自体のオーバーヘッドは無視できる)。
+     */
+    checkpointer,
+    interruptOn,
   });
 }

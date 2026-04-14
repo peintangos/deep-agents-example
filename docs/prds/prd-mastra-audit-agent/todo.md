@@ -25,3 +25,7 @@ Mark completed tasks with `- [x]` instead of removing them.
 - [x] spec-005: ユーザー好み (レポート文体 / 優先観点) を `/memories/user-preferences.json` に記録 / 復元するヘルパーを実装する
 - [x] spec-005: 過去の監査履歴を `/memories/history/<target>-<yyyy-mm>.json` に保存するヘルパーと AUDIT_SYSTEM_PROMPT への履歴参照指示を追加する
 - [x] spec-005: 同一 store を共有した 2 回の createAuditAgent 呼び出しで `/memories/` のデータが維持されることを検証する統合テストを書く
+- [x] spec-006: `createAuditAgent()` に `checkpointer` (MemorySaver) と `interruptOn` を追加し、外部 API 系ツール (`fetch_github`, `query_osv`) を承認対象に含める (`write_file` は built-in 経由で `/raw/` にも呼ばれるので除外し、`/memories/` / `/reports/` への書き込みは orchestrator 側で HITL する方針に変更)
+- [ ] spec-006: CLI (`src/cli.ts`) に interrupt 検出 → 承認プロンプト → `Command(resume=...)` ハンドラを pure 関数として追加する (interactive I/O は `scripts/run-audit.ts` 側に薄く置く)
+- [ ] spec-006: 承認 / 却下イベントを `/raw/hitl/log.jsonl` に追記する HITL ログヘルパーを実装する
+- [ ] spec-006: interrupt → resume → 完了 の 1 サイクルを検証する E2E テストを書く (LLM 呼び出しは差し替え可能にし、interrupt の発火と resume の反映だけを決定論的に追う)

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { InMemoryStore } from "@langchain/langgraph-checkpoint";
+import { InMemoryStore, MemorySaver } from "@langchain/langgraph-checkpoint";
 import {
   createAuditAgent,
+  DEFAULT_INTERRUPT_ON,
   DEFAULT_MODEL_NAME,
   OPENROUTER_BASE_URL,
   AUDIT_SYSTEM_PROMPT,
@@ -157,5 +158,70 @@ describe("createAuditAgent store injection (spec-005)", () => {
     await store.put(["test-namespace"], "key1", { hello: "world" });
     const item = await store.get(["test-namespace"], "key1");
     expect(item?.value).toEqual({ hello: "world" });
+  });
+});
+
+describe("createAuditAgent HITL wiring (spec-006)", () => {
+  const originalKey = process.env.OPENROUTER_API_KEY;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-dummy-test-key";
+  });
+
+  afterEach(() => {
+    if (originalKey === undefined) {
+      delete process.env.OPENROUTER_API_KEY;
+    } else {
+      process.env.OPENROUTER_API_KEY = originalKey;
+    }
+  });
+
+  it("creates an agent with an injected checkpointer without throwing", () => {
+    const checkpointer = new MemorySaver();
+    const agent = createAuditAgent({ checkpointer });
+    expect(agent).toBeDefined();
+    expect(typeof agent.invoke).toBe("function");
+  });
+
+  it("creates a default MemorySaver when no checkpointer option is passed", () => {
+    // interruptOn をデフォルト (= HITL 有効) のまま、checkpointer 省略で agent が
+    // 生成できることを検証する。checkpointer が無いと HITL middleware が
+    // state を保てず実行時に落ちるが、デフォルトで MemorySaver が注入されて
+    // いれば生成時点では throw しない。
+    const agent = createAuditAgent();
+    expect(agent).toBeDefined();
+  });
+
+  it("accepts a custom interruptOn map for tests that want to disable HITL", () => {
+    // interruptOn: {} を渡すと実質 HITL 無効。HITL を使わないサブエージェント単体
+    // テストや future spec で「配線だけ残して中断は止めたい」ケースで使う。
+    const agent = createAuditAgent({ interruptOn: {} });
+    expect(agent).toBeDefined();
+  });
+
+  it("exposes DEFAULT_INTERRUPT_ON with exactly the two external-API tools", () => {
+    expect(Object.keys(DEFAULT_INTERRUPT_ON).sort()).toEqual([
+      "fetch_github",
+      "query_osv",
+    ]);
+  });
+
+  it("does NOT include write_file in DEFAULT_INTERRUPT_ON (would block /raw/ writes)", () => {
+    // write_file を中断対象に含めると、各サブエージェントが /raw/<aspect>/result.json
+    // を書こうとするたびに中断がかかり、監査が事実上進まなくなる。将来 write_file
+    // の中断が必要になったときは「パス引数でフィルタする description factory」を
+    // 用意するなど別戦略が必要 — ここでの選択が将来のトリガーになるよう明示する。
+    expect(DEFAULT_INTERRUPT_ON).not.toHaveProperty("write_file");
+    expect(DEFAULT_INTERRUPT_ON).not.toHaveProperty("read_file");
+  });
+
+  it("configures each HITL tool with approve/reject decisions and a Japanese description", () => {
+    for (const [toolName, config] of Object.entries(DEFAULT_INTERRUPT_ON)) {
+      expect(config.allowedDecisions).toEqual(["approve", "reject"]);
+      expect(typeof config.description).toBe("string");
+      // 日本語 (CJK 文字) を含むこと。description に英文が紛れ込むのを防ぐ。
+      expect(config.description as string).toMatch(/[\u3040-\u30ff\u4e00-\u9faf]/);
+      expect(toolName).toMatch(/^(fetch_github|query_osv)$/);
+    }
   });
 });
