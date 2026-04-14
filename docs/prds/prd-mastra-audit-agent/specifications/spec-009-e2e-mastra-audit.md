@@ -30,7 +30,7 @@ Feature: Mastra を対象に E2E 監査を実行する
 
 ## Implementation Steps
 
-- [ ] `scripts/run-audit.ts` の CLI に `--target` オプションを追加し、任意の GitHub リポジトリを指定可能にする
+- [x] `scripts/run-audit.ts` の CLI に `--target` オプションを追加し、任意の GitHub リポジトリを指定可能にする — `src/cli.ts` に pure 関数 `parseTargetArg` (形式チェック: ちょうど 1 つの `/` で分割可能かだけを見る) と `buildAuditPrompt` (対象 identity だけを含む薄いユーザープロンプト、監査手順は AUDIT_SYSTEM_PROMPT 側に集約して drift を防ぐ) を export。意味的バリデーション (GitHub 命名規則 regex + trailing-hyphen) は spec-008 の `validateGithubRepoArgs` を再利用して重複を避ける。`--invoke` と `--target` は排他 (どちらも invoker へプロンプトを渡す入口のため、優先順位を曖昧にしない)。tests/cli.test.ts に 14 ケース追加、合計 333 tests 全通過
 - [ ] Mastra (`mastra-ai/mastra`) を対象に E2E 実行し、実環境での挙動を検証する
 - [ ] 出力された `out/mastra-audit-report.md` を人間がレビューし、Zenn 記事向けに気になる点を `knowledge.md` に追記
 - [ ] `out/.state/tool-calls.jsonl` から記事用の統計（ツール呼び出し回数、HITL 介入回数など）を抽出
