@@ -39,5 +39,5 @@ Feature: 特定ツールの実行前に人間の承認を挟む
 - [x] `createDeepAgent()` に `checkpointer` (`MemorySaver` — TS では `InMemorySaver` ではなく `MemorySaver` が正しい名称) と `interruptOn` を追加 (`src/agent.ts` の `CreateAuditAgentOptions` に両方を optional 注入できる DI パターンを確立、デフォルトで `fetch_github` + `query_osv` に承認を要求、`write_file` は `/raw/` への書き込みと衝突するため除外)
 - [x] CLI 側で中断を検出してプロンプトを出し、ユーザー入力を `Command(resume=...)` に変換するハンドラを実装 (`src/hitl.ts` に pure core、`scripts/run-audit.ts` に readline ベースの consolePolicy + HITL ループを実装。`MAX_HITL_ITERATIONS = 20` で無限ループを防止、`thread_id` は `randomUUID()` で毎回新規に発行)
 - [x] 承認 / 却下のログを `/raw/hitl/log.jsonl` に残す (`src/hitl-log.ts` で JSONL 形式の append-only ログを実装。agent の仮想 FS ではなく物理ファイル `out/raw/hitl/log.jsonl` に書く — HITL は CLI 層イベントで agent 内部では発火しないため。壊れた行はスキップする寛容パーサでクラッシュ recovery に対応)
-- [ ] テスト: interrupt → resume の E2E 流れ
-- [ ] Review (typecheck + test + `/code-review`)
+- [x] テスト: interrupt → resume の E2E 流れ (`tests/hitl-e2e.test.ts` で langchain の `createAgent` + factory-based `fakeModel` を使い 4 ケースを決定論的に検証。interrupt → approve → complete / interrupt → reject → complete / 2 thread 並行 / 初回 interrupt 検出)
+- [x] Review (typecheck + test + `/code-review`)

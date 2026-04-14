@@ -178,6 +178,55 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### `fakeModel` の bindTools callIndex 問題と factory-based 回避策
+
+`@langchain/core/testing` の `fakeModel()` で HITL interrupt/resume の E2E を書くとき、**queue ベースの respond/respondWithTools はほぼ確実に壊れる**。原因は `bindTools()` 実装 (`node_modules/@langchain/core/dist/testing/fake_model_builder.js:120-127`):
+
+\`\`\`js
+bindTools(tools) {
+  const next = new FakeBuiltModel();
+  next.queue = this.queue;          // ← shared by reference
+  next._callIndex = this._callIndex; // ← COPIED by value
+  return next.withConfig({});
+}
+\`\`\`
+
+新しい `FakeBuiltModel` インスタンスは queue を共有するが `_callIndex` は値コピー。`createAgent` が invoke ごとに bindTools を呼び直すと、毎回新しいカウンタが誕生して **queue[0] を何度も消費**し、queue[1] 以降に到達しない。結果として:
+
+- 初回 invoke: queue[0] (respondWithTools) → tool_call → interrupt ✓
+- 2 回目 invoke (Command resume): 新しい binding、callIndex=0 → queue[0] を再消費 → また tool_call → また interrupt (**無限ループ**)
+
+**回避策は "queue 位置に依存しない factory-based respond"**:
+
+\`\`\`ts
+const model = fakeModel().respond((messages: BaseMessage[]) => {
+  const last = messages[messages.length - 1];
+  if (last && ToolMessage.isInstance(last)) {
+    // tool が実行済み → 最終 AIMessage で終了
+    return new AIMessage("監査完了");
+  }
+  // 初回 → tool_call を発行して HITL 中断を誘発
+  return new AIMessage({
+    content: "",
+    tool_calls: [{ name: "external_probe", args: {...}, id: "tc1", type: "tool_call" }],
+  });
+});
+\`\`\`
+
+queue には **1 つの factory だけ** を入れ、factory が messages を見て応答を決める。これで bindings 境界を越えても挙動が決定論的になる。2 つの独立した thread で別のレスポンスを返したい場合も、factory 内で human message の内容から target を抽出すれば OK。
+
+**教訓の一般化**: モックは **「状態より関数で書け」**。queue 位置依存の mock は mock consumer 側の呼び出し戦略 (bindings, キャッシュ, re-instantiation) に簡単に壊されるが、pure function mock は入力だけ見れば答えが決まるので呼び出し戦略に依存しない。テストで state-ful mock を使うときはまずこの観点で設計を疑う。
+
+### E2E テストでは langchain の `createAgent` を直接叩く (deepagents の重量級 middleware を避ける)
+
+spec-006 の interrupt/resume E2E では **`createDeepAgent` ではなく langchain の `createAgent`** を直接使った。理由:
+
+1. `createDeepAgent` は `summarizationMiddleware` / `todoListMiddleware` / `filesystemMiddleware` などを自動注入し、それらが内部で model を叩くため `fakeModel.callCount` が膨らんで切り分けが困難になる
+2. `BASE_AGENT_PROMPT` が system prompt に連結されるので、`fakeModel` の content derivation が想定外の文字列を返す
+3. HITL ロジックの検証に必要な最小要素は「tool を 1 つ持つ agent + HITL middleware + checkpointer」で、deepagents の他の機能は論点外
+
+`createAuditAgent` 側の HITL 配線は `tests/smoke.test.ts` の 6 ケースで別途検証されており、**実際に HITL middleware が走る動作証跡** は本 E2E で取る、という 2 段階のテスト戦略。createDeepAgent の重量級な振る舞いを毎回 E2E で再現する必要はなく、むしろノイズになる。
+
 ### HITL ログは物理ファイル (`out/raw/hitl/log.jsonl`) に書く
 
 spec-006 の 3 番目のタスクで HITL 判断ログを JSONL で永続化した。`src/hitl-log.ts` が pure 関数 (`createHitlLogEvent` / `formatHitlEventLine`) と I/O 関数 (`appendHitlEvents` / `readHitlEvents`) の 2 層で構成されている。
