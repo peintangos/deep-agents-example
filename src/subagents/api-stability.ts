@@ -3,8 +3,21 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createFetchGithubTool } from "../tools/fetch-github";
 import { rawPath } from "../fs-layout";
 
+/**
+ * api-stability サブエージェントに流す skill ソースのデフォルト。
+ * 詳細は license-analyzer.ts の解説参照。
+ */
+export const DEFAULT_API_STABILITY_SKILLS: readonly string[] = [
+  "/skills/audit/api-stability/",
+] as const;
+
 export interface ApiStabilityOptions {
   readonly tools?: readonly StructuredTool[];
+  /**
+   * このサブエージェントに流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_API_STABILITY_SKILLS}。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -20,12 +33,14 @@ export function createApiStabilitySubAgent(
   options: ApiStabilityOptions = {},
 ): SubAgent {
   const tools = [...(options.tools ?? [createFetchGithubTool()])];
+  const skills = options.skills ?? DEFAULT_API_STABILITY_SKILLS;
   const outputPath = rawPath("api-stability", "result.json");
 
   return {
     name: "api-stability",
     description:
       "OSS の API 安定性 (breaking change 頻度 / SemVer 遵守度) を評価する。API 安定性観点での監査が必要な場合に委譲する。",
+    skills: [...skills],
     systemPrompt: `あなたは OSS の API 安定性 (SemVer 遵守度) を評価するサブエージェントです。
 
 ミッション:

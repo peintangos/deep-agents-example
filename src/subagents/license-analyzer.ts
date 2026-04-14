@@ -3,12 +3,36 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createFetchGithubTool } from "../tools/fetch-github";
 import { rawPath } from "../fs-layout";
 
+/**
+ * license-analyzer サブエージェントに流す skill ソースのデフォルト。
+ *
+ * 段階的開示の原則で、このサブエージェントには自分の担当観点の SKILL.md だけを
+ * 流す。メインエージェントの {@link DEFAULT_SKILL_SOURCES} は `/skills/audit/` +
+ * `/skills/report/` の広いソース指定だが、license-analyzer は自観点の判断基準
+ * (SPDX 特定 / 商用利用制約 / 互換性チェック) さえ読めれば良い。
+ *
+ * deepagents v1.9 では **custom subagent はメインの skills を継承しない**
+ * (general-purpose だけが継承) ため、各 factory で明示的に skill パスを返す
+ * 必要がある。ここを省略すると license-analyzer は SKILL.md を一切読まずに動く。
+ */
+export const DEFAULT_LICENSE_ANALYZER_SKILLS: readonly string[] = [
+  "/skills/audit/license/",
+] as const;
+
 export interface LicenseAnalyzerOptions {
   /**
    * サブエージェントに注入するツール群。省略時は `fetch_github` のデフォルト実装を使う。
    * テストや本番環境で別のクライアントを使いたい場合は明示的に渡す。
    */
   readonly tools?: readonly StructuredTool[];
+
+  /**
+   * このサブエージェントに流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_LICENSE_ANALYZER_SKILLS}。空配列 `[]` を渡すと
+   * skills middleware は何も読まず、実質 skill 無効化のままこの factory が
+   * 作るサブエージェントを構成できる (スモークテスト等で使える)。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -26,6 +50,7 @@ export function createLicenseAnalyzerSubAgent(
   const tools = [
     ...(options.tools ?? [createFetchGithubTool()]),
   ];
+  const skills = options.skills ?? DEFAULT_LICENSE_ANALYZER_SKILLS;
 
   const outputPath = rawPath("license", "result.json");
 
@@ -33,6 +58,7 @@ export function createLicenseAnalyzerSubAgent(
     name: "license-analyzer",
     description:
       "OSS リポジトリのライセンス種別と依存ライブラリとの互換性を調査する。ライセンス観点での監査が必要な場合にメインエージェントが委譲する。",
+    skills: [...skills],
     systemPrompt: `あなたはライセンス監査に特化したサブエージェントです。
 
 ミッション:

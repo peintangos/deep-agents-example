@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { createLicenseAnalyzerSubAgent } from "../../src/subagents/license-analyzer";
+import {
+  createLicenseAnalyzerSubAgent,
+  DEFAULT_LICENSE_ANALYZER_SKILLS,
+} from "../../src/subagents/license-analyzer";
 
 function fakeTool(name: string) {
   return tool(
@@ -43,5 +46,21 @@ describe("createLicenseAnalyzerSubAgent", () => {
   it("documents the fact-only principle in the system prompt", () => {
     const subagent = createLicenseAnalyzerSubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.systemPrompt).toMatch(/ファクト|推測は避/);
+  });
+
+  // spec-007: skill 配線の粒度検証。license-analyzer は license 観点の 1 つだけを
+  // 段階的開示で受け取り、他観点や report 文体 skill は流れないことを保証する。
+  it("assigns exactly the license skill source by default (progressive disclosure scope)", () => {
+    const subagent = createLicenseAnalyzerSubAgent({ tools: [fakeTool("fetch_github")] });
+    expect(subagent.skills).toEqual([...DEFAULT_LICENSE_ANALYZER_SKILLS]);
+    expect(DEFAULT_LICENSE_ANALYZER_SKILLS).toEqual(["/skills/audit/license/"]);
+  });
+
+  it("accepts a custom skills array that overrides the default", () => {
+    const subagent = createLicenseAnalyzerSubAgent({
+      tools: [fakeTool("fetch_github")],
+      skills: ["/skills/audit/custom/"],
+    });
+    expect(subagent.skills).toEqual(["/skills/audit/custom/"]);
   });
 });

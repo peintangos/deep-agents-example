@@ -3,8 +3,21 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createFetchGithubTool } from "../tools/fetch-github";
 import { rawPath } from "../fs-layout";
 
+/**
+ * community-adoption サブエージェントに流す skill ソースのデフォルト。
+ * 詳細は license-analyzer.ts の解説参照。
+ */
+export const DEFAULT_COMMUNITY_ADOPTION_SKILLS: readonly string[] = [
+  "/skills/audit/community/",
+] as const;
+
 export interface CommunityAdoptionOptions {
   readonly tools?: readonly StructuredTool[];
+  /**
+   * このサブエージェントに流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_COMMUNITY_ADOPTION_SKILLS}。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -19,12 +32,14 @@ export function createCommunityAdoptionSubAgent(
   options: CommunityAdoptionOptions = {},
 ): SubAgent {
   const tools = [...(options.tools ?? [createFetchGithubTool()])];
+  const skills = options.skills ?? DEFAULT_COMMUNITY_ADOPTION_SKILLS;
   const outputPath = rawPath("community", "result.json");
 
   return {
     name: "community-adoption",
     description:
       "OSS のコミュニティ採用状況 (stars / forks / dependents / 実運用事例) を評価する。コミュニティ観点での監査が必要な場合に委譲する。",
+    skills: [...skills],
     systemPrompt: `あなたは OSS のコミュニティ採用状況を評価するサブエージェントです。
 
 ミッション:

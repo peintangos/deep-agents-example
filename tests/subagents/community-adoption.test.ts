@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { createCommunityAdoptionSubAgent } from "../../src/subagents/community-adoption";
+import {
+  createCommunityAdoptionSubAgent,
+  DEFAULT_COMMUNITY_ADOPTION_SKILLS,
+} from "../../src/subagents/community-adoption";
 
 function fakeTool(name: string) {
   return tool(
@@ -39,5 +42,20 @@ describe("createCommunityAdoptionSubAgent", () => {
   it("documents the adoption tier scale in the system prompt", () => {
     const subagent = createCommunityAdoptionSubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.systemPrompt).toMatch(/niche|rising|popular|mainstream/);
+  });
+
+  // spec-007: skill 配線の粒度検証。
+  it("assigns exactly the community skill source by default (progressive disclosure scope)", () => {
+    const subagent = createCommunityAdoptionSubAgent({ tools: [fakeTool("fetch_github")] });
+    expect(subagent.skills).toEqual([...DEFAULT_COMMUNITY_ADOPTION_SKILLS]);
+    expect(DEFAULT_COMMUNITY_ADOPTION_SKILLS).toEqual(["/skills/audit/community/"]);
+  });
+
+  it("accepts a custom skills array that overrides the default", () => {
+    const subagent = createCommunityAdoptionSubAgent({
+      tools: [fakeTool("fetch_github")],
+      skills: ["/skills/audit/custom/"],
+    });
+    expect(subagent.skills).toEqual(["/skills/audit/custom/"]);
   });
 });

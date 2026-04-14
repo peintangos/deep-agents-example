@@ -2,6 +2,24 @@ import type { SubAgent } from "deepagents";
 import type { StructuredTool } from "@langchain/core/tools";
 import { rawPath } from "../fs-layout";
 
+/**
+ * critic サブエージェントに流す skill ソースのデフォルト。
+ *
+ * critic の責務は 5 観点の raw データを横断で読み、観点間の矛盾・不足・ファクト
+ * エラーを検出することにある。そのため **5 観点のすべての SKILL.md を読める
+ * 必要がある** (どの観点が何を判定するかを理解しないと、findings の根拠が浅く
+ * なる)。他のサブエージェントは自観点だけの 1 ソースだが、critic は例外的に
+ * `/skills/audit/` 直下のすべてを scan する広いソース指定を使う。
+ *
+ * これは spec-007 の acceptance criterion "サブエージェントが独自の Skills を
+ * 持てる" を満たすための典型例: メイン agent は audit + report の 2 ソース、
+ * critic は audit のみの 1 ソース、license-analyzer 等は audit/<aspect> の
+ * ピンポイント 1 ソース、と粒度が 3 階層に分かれる。
+ */
+export const DEFAULT_CRITIC_SKILLS: readonly string[] = [
+  "/skills/audit/",
+] as const;
+
 export interface CriticOptions {
   /**
    * サブエージェントに注入する追加ツール。
@@ -14,6 +32,12 @@ export interface CriticOptions {
    * (`read_file` / `write_file` / `edit_file` など) に委ねる。
    */
   readonly tools?: readonly StructuredTool[];
+
+  /**
+   * critic に流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_CRITIC_SKILLS} (`/skills/audit/` 全体)。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -37,10 +61,13 @@ export function createCriticSubAgent(options: CriticOptions = {}): SubAgent {
     community: rawPath("community", "result.json"),
   };
 
+  const skills = options.skills ?? DEFAULT_CRITIC_SKILLS;
+
   const agent: SubAgent = {
     name: "critic",
     description:
       "5 観点の監査結果を読み込み、観点間の矛盾・不足・ファクトエラーを検出する整合性検証サブエージェント。監査フェーズ終了後にメインエージェントが呼び出す。",
+    skills: [...skills],
     systemPrompt: `あなたは監査結果の整合性を検証する critic サブエージェントです。
 
 ミッション:

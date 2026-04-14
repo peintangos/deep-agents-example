@@ -3,8 +3,22 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createQueryOsvTool } from "../tools/query-osv";
 import { rawPath } from "../fs-layout";
 
+/**
+ * security-auditor サブエージェントに流す skill ソースのデフォルト。
+ * 段階的開示の原則で、このサブエージェントは自分の担当観点 (脆弱性スキャン)
+ * の SKILL.md だけを読む。詳細は license-analyzer.ts の解説参照。
+ */
+export const DEFAULT_SECURITY_AUDITOR_SKILLS: readonly string[] = [
+  "/skills/audit/security/",
+] as const;
+
 export interface SecurityAuditorOptions {
   readonly tools?: readonly StructuredTool[];
+  /**
+   * このサブエージェントに流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_SECURITY_AUDITOR_SKILLS}。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -20,12 +34,14 @@ export function createSecurityAuditorSubAgent(
   options: SecurityAuditorOptions = {},
 ): SubAgent {
   const tools = [...(options.tools ?? [createQueryOsvTool()])];
+  const skills = options.skills ?? DEFAULT_SECURITY_AUDITOR_SKILLS;
   const outputPath = rawPath("security", "result.json");
 
   return {
     name: "security-auditor",
     description:
       "OSS の依存ライブラリの脆弱性を OSV データベースで調査する。セキュリティ観点での監査が必要な場合にメインエージェントが委譲する。",
+    skills: [...skills],
     systemPrompt: `あなたはセキュリティ脆弱性監査に特化したサブエージェントです。
 
 ミッション:

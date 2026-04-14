@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { createMaintenanceHealthSubAgent } from "../../src/subagents/maintenance-health";
+import {
+  createMaintenanceHealthSubAgent,
+  DEFAULT_MAINTENANCE_HEALTH_SKILLS,
+} from "../../src/subagents/maintenance-health";
 
 function fakeTool(name: string) {
   return tool(
@@ -39,5 +42,20 @@ describe("createMaintenanceHealthSubAgent", () => {
   it("documents the healthy/warning/stale thresholds in the system prompt", () => {
     const subagent = createMaintenanceHealthSubAgent({ tools: [fakeTool("fetch_github")] });
     expect(subagent.systemPrompt).toMatch(/healthy.*warning.*stale/s);
+  });
+
+  // spec-007: skill 配線の粒度検証。
+  it("assigns exactly the maintenance skill source by default (progressive disclosure scope)", () => {
+    const subagent = createMaintenanceHealthSubAgent({ tools: [fakeTool("fetch_github")] });
+    expect(subagent.skills).toEqual([...DEFAULT_MAINTENANCE_HEALTH_SKILLS]);
+    expect(DEFAULT_MAINTENANCE_HEALTH_SKILLS).toEqual(["/skills/audit/maintenance/"]);
+  });
+
+  it("accepts a custom skills array that overrides the default", () => {
+    const subagent = createMaintenanceHealthSubAgent({
+      tools: [fakeTool("fetch_github")],
+      skills: ["/skills/audit/custom/"],
+    });
+    expect(subagent.skills).toEqual(["/skills/audit/custom/"]);
   });
 });

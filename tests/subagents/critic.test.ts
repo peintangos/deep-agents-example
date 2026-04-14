@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { createCriticSubAgent } from "../../src/subagents/critic";
+import {
+  createCriticSubAgent,
+  DEFAULT_CRITIC_SKILLS,
+} from "../../src/subagents/critic";
 
 function fakeTool(name: string) {
   return tool(
@@ -61,5 +64,24 @@ describe("createCriticSubAgent", () => {
     const subagent = createCriticSubAgent({ tools: [customTool] });
     expect(subagent.tools).toHaveLength(1);
     expect(subagent.tools?.[0]?.name).toBe("custom_stub");
+  });
+
+  // spec-007: critic は 5 観点を横断で評価するため、例外的に `/skills/audit/` 全体を
+  // scan する。他のサブエージェント (license/security/etc) は自観点の 1 ソースだけで、
+  // メインは `/skills/audit/` + `/skills/report/` の 2 ソース。3 階層の粒度分布。
+  it("assigns `/skills/audit/` as a whole (cross-aspect context) by default", () => {
+    const subagent = createCriticSubAgent();
+    expect(subagent.skills).toEqual([...DEFAULT_CRITIC_SKILLS]);
+    expect(DEFAULT_CRITIC_SKILLS).toEqual(["/skills/audit/"]);
+    // report skill はメイン側のみ。critic には流れない (監査結果の整合性検証が
+    // 責務で、レポート文体は関知しないため)。
+    expect([...DEFAULT_CRITIC_SKILLS]).not.toContain("/skills/report/");
+  });
+
+  it("accepts a custom skills array that overrides the default", () => {
+    const subagent = createCriticSubAgent({
+      skills: ["/skills/audit/consistency/"],
+    });
+    expect(subagent.skills).toEqual(["/skills/audit/consistency/"]);
   });
 });

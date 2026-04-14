@@ -3,8 +3,21 @@ import type { StructuredTool } from "@langchain/core/tools";
 import { createFetchGithubTool } from "../tools/fetch-github";
 import { rawPath } from "../fs-layout";
 
+/**
+ * maintenance-health サブエージェントに流す skill ソースのデフォルト。
+ * 詳細は license-analyzer.ts の解説参照。
+ */
+export const DEFAULT_MAINTENANCE_HEALTH_SKILLS: readonly string[] = [
+  "/skills/audit/maintenance/",
+] as const;
+
 export interface MaintenanceHealthOptions {
   readonly tools?: readonly StructuredTool[];
+  /**
+   * このサブエージェントに流す skill ソースのリスト (仮想パス)。
+   * 省略時は {@link DEFAULT_MAINTENANCE_HEALTH_SKILLS}。
+   */
+  readonly skills?: readonly string[];
 }
 
 /**
@@ -20,12 +33,14 @@ export function createMaintenanceHealthSubAgent(
   options: MaintenanceHealthOptions = {},
 ): SubAgent {
   const tools = [...(options.tools ?? [createFetchGithubTool()])];
+  const skills = options.skills ?? DEFAULT_MAINTENANCE_HEALTH_SKILLS;
   const outputPath = rawPath("maintenance", "result.json");
 
   return {
     name: "maintenance-health",
     description:
       "OSS のメンテナンス健全性 (活発度 / メンテナ応答性 / archived 状態など) を評価する。メンテナンス観点での監査が必要な場合に委譲する。",
+    skills: [...skills],
     systemPrompt: `あなたは OSS のメンテナンス健全性を評価するサブエージェントです。
 
 ミッション:

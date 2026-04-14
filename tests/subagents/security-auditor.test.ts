@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { createSecurityAuditorSubAgent } from "../../src/subagents/security-auditor";
+import {
+  createSecurityAuditorSubAgent,
+  DEFAULT_SECURITY_AUDITOR_SKILLS,
+} from "../../src/subagents/security-auditor";
 
 function fakeTool(name: string) {
   return tool(
@@ -39,5 +42,20 @@ describe("createSecurityAuditorSubAgent", () => {
   it("documents severity categorization in the system prompt", () => {
     const subagent = createSecurityAuditorSubAgent({ tools: [fakeTool("query_osv")] });
     expect(subagent.systemPrompt).toMatch(/CRITICAL|HIGH|MEDIUM|LOW/);
+  });
+
+  // spec-007: skill 配線の粒度検証。security-auditor は security 観点だけを受け取る。
+  it("assigns exactly the security skill source by default (progressive disclosure scope)", () => {
+    const subagent = createSecurityAuditorSubAgent({ tools: [fakeTool("query_osv")] });
+    expect(subagent.skills).toEqual([...DEFAULT_SECURITY_AUDITOR_SKILLS]);
+    expect(DEFAULT_SECURITY_AUDITOR_SKILLS).toEqual(["/skills/audit/security/"]);
+  });
+
+  it("accepts a custom skills array that overrides the default", () => {
+    const subagent = createSecurityAuditorSubAgent({
+      tools: [fakeTool("query_osv")],
+      skills: ["/skills/audit/custom/"],
+    });
+    expect(subagent.skills).toEqual(["/skills/audit/custom/"]);
   });
 });
