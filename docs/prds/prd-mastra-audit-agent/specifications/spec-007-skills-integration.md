@@ -38,7 +38,7 @@ Feature: Skills が段階的開示で読み込まれる
 
 - [x] `skills/audit/` 配下に 5 観点分の SKILL.md を作成（詳細チェックリスト） — `license` / `security` / `maintenance` / `api-stability` / `community` の 5 ファイル。YAML frontmatter (name = directory 名, description, allowed-tools) + 本体 (判定基準テーブル + NG 例 + 出力契約) で統一。`tests/skills-audit.test.ts` で 26 ケース format 契約
 - [x] `skills/report/zenn-style/SKILL.md` で文体ガイドラインを定義 — だ/である調 / 結論→根拠→含意 / 見出し構造 (`###` 3 段構成) / 総合判定テーブルテンプレ / critic findings の書き換えルール / 5 条件の出力契約を定義。`tests/skills-report.test.ts` で形式契約 5 + zenn-style 固有の内容契約 3 (だ/である調の言及 / Markdown table 構文 / `###` 見出し言及) を固定 (9 ケース)
-- [ ] `createDeepAgent()` の `skills` オプションに Skills ディレクトリを登録
+- [x] `createDeepAgent()` の `skills` オプションに Skills ディレクトリを登録 — `src/agent.ts` に `DEFAULT_SKILLS_ROOT_DIR` (`import.meta.url` + `../skills`) と `DEFAULT_SKILL_SOURCES` (`/skills/audit/`, `/skills/report/`) を追加。`backend` factory を 3-way CompositeBackend (`/memories/` → StoreBackend, `/skills/` → FilesystemBackend{virtualMode}, default → StateBackend) に拡張し、`createDeepAgent` の `skills` オプションに連動。`CreateAuditAgentOptions` に `skillsRootDir` / `skills` の DI を追加。`tests/smoke.test.ts` に配線テスト 11 ケース追加 (exports 契約 3 + 構成スモーク 4 + CompositeBackend ルーティング 4 で、default rootDir / custom rootDir / zenn-style 読み出し / virtualMode traversal 拒否を証跡化)
 - [ ] サブエージェントにも必要な Skills を個別割り当て
 - [ ] テスト: 関連性マッチングで正しい Skill が読み込まれることを確認
 - [ ] Review (typecheck + test + `/code-review`)

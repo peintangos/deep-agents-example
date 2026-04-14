@@ -1,8 +1,11 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { ChatOpenAI } from "@langchain/openai";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
   createDeepAgent,
   CompositeBackend,
+  FilesystemBackend,
   StateBackend,
   StoreBackend,
 } from "deepagents";
@@ -122,6 +125,38 @@ export function createLlm(): BaseChatModel {
  * tool としては発火しないので interruptOn で絡める必要がない (spec-005 の責務境界と
  * 同じ方針)。
  */
+/**
+ * 仮想 `/skills/` ネームスペースのルートになる実ファイルシステムディレクトリ。
+ *
+ * `src/agent.ts` からの相対位置で `../skills` を指しているので、vitest / `npx tsx` /
+ * 本番 `node` 実行のいずれでも `import.meta.url` から同じリポジトリ直下の
+ * `skills/` ディレクトリに解決される。cwd に依存しない点が重要 (CI や
+ * `scripts/run-audit.ts` から呼ばれても壊れない)。
+ */
+export const DEFAULT_SKILLS_ROOT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "skills",
+);
+
+/**
+ * SkillsMiddleware に渡すデフォルトの skill ソース (仮想パス)。
+ *
+ * CompositeBackend で `/skills/` は FilesystemBackend にルーティングされるため、
+ * ここに書くのは「prefix 込みの仮想パス」であって実ファイルパスではない。
+ * 実ファイルは `DEFAULT_SKILLS_ROOT_DIR/audit/<aspect>/SKILL.md` /
+ * `DEFAULT_SKILLS_ROOT_DIR/report/<style>/SKILL.md` に配置されている。
+ *
+ * SkillsMiddleware は列挙された各ソース配下を走査して SKILL.md を見つけ、
+ * frontmatter (`name` / `description`) をシステムプロンプトに注入する。本体の
+ * Markdown は段階的開示 (Progressive Disclosure) により、エージェントが必要と
+ * 判断したタイミングでのみ読み込まれる。
+ */
+export const DEFAULT_SKILL_SOURCES: readonly string[] = [
+  "/skills/audit/",
+  "/skills/report/",
+] as const;
+
 export const DEFAULT_INTERRUPT_ON: Record<string, InterruptOnConfig> = {
   fetch_github: {
     allowedDecisions: ["approve", "reject"],
@@ -178,12 +213,43 @@ export interface CreateAuditAgentOptions {
    * 検証できる。
    */
   readonly interruptOn?: Record<string, InterruptOnConfig>;
+
+  /**
+   * 仮想 `/skills/` ネームスペースの物理ルート。
+   *
+   * 省略時は {@link DEFAULT_SKILLS_ROOT_DIR} (リポジトリ直下 `skills/`)。
+   * テストでは `tmpdir` に制御された SKILL.md を配置してから渡すことで、
+   * 本物の `skills/` 配下に干渉せず「特定 skill だけ読み込まれる」ような
+   * 段階的開示の検証ができる。
+   *
+   * `FilesystemBackend({ virtualMode: true })` 経由で `..` / `~` による
+   * traversal は内部的に拒否されるため、agent 側から `skillsRootDir` 外の
+   * ファイルにはアクセスできない。
+   */
+  readonly skillsRootDir?: string;
+
+  /**
+   * SkillsMiddleware が読み込む skill ソースの仮想パスリスト。
+   *
+   * 省略時は {@link DEFAULT_SKILL_SOURCES} (`["/skills/audit/", "/skills/report/"]`)。
+   * 空配列 `[]` を渡すと skills middleware は何も読み込まず、実質 skill 無効化
+   * のまま agent を構成できる (skills 機能を切った状態でのテスト向け)。
+   *
+   * サブエージェントごとに異なる skill セットを割り当てる配線は、サブエージェント
+   * factory 側の `skills` フィールドで別途行う。ここで指定するのは
+   * **メインエージェントに見える skill ソース** のみで、サブエージェントには
+   * 自動伝搬しない (deepagents v1.9 では `general-purpose` サブエージェントだけが
+   * メインの skills を継承する仕様)。
+   */
+  readonly skills?: readonly string[];
 }
 
 export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
   const store = options.store ?? new InMemoryStore();
   const checkpointer = options.checkpointer ?? new MemorySaver();
   const interruptOn = options.interruptOn ?? DEFAULT_INTERRUPT_ON;
+  const skillsRootDir = options.skillsRootDir ?? DEFAULT_SKILLS_ROOT_DIR;
+  const skills = options.skills ?? DEFAULT_SKILL_SOURCES;
   return createDeepAgent({
     model: createLlm(),
     systemPrompt: AUDIT_SYSTEM_PROMPT,
@@ -197,18 +263,44 @@ export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
     ],
     store,
     /**
-     * `/memories/` 配下はセッション横断で永続化したいので StoreBackend に、
-     * それ以外のすべてのパス (`/raw/`, `/reports/`, `/` 直下の transient データ等) は
-     * deepagents のデフォルト同様 StateBackend (ephemeral) に振り分ける。
+     * 3-way の CompositeBackend ルーティング:
      *
-     * これが spec-005 のコア配線。`CompositeBackend` の prefix ルーティング経由で
-     * サブエージェントは `write_file("/memories/audit-policy.json", ...)` のような
-     * 既存の built-in ツールを使うだけで長期メモリにアクセスできる。
+     *   - `/memories/` → StoreBackend   : セッション横断の永続化 (spec-005)
+     *   - `/skills/`   → FilesystemBackend(virtualMode)
+     *                                   : リポジトリ直下 `skills/` 配下の
+     *                                     SKILL.md を段階的開示で読み込む (spec-007)
+     *   - その他       → StateBackend   : `/raw/`, `/reports/`, transient 等
+     *
+     * `CompositeBackend` は longest-prefix match でルーティングし、prefix を
+     * ストリップしてから下位 backend に渡す (dist/index.js L5183)。
+     * したがって SkillsMiddleware が `/skills/audit/license/SKILL.md` を読むとき、
+     * FilesystemBackend 側には `/audit/license/SKILL.md` として渡り、
+     * `skillsRootDir` 配下の実ファイルに解決される。
+     *
+     * `FilesystemBackend({ virtualMode: true })` は traversal (`..` / `~`) を
+     * 拒否するので、agent が `/skills/../` のような形で外に抜け出すことはできない。
      */
     backend: (config) =>
       new CompositeBackend(new StateBackend(config), {
         "/memories/": new StoreBackend(),
+        "/skills/": new FilesystemBackend({
+          rootDir: skillsRootDir,
+          virtualMode: true,
+        }),
       }),
+    /**
+     * SkillsMiddleware に渡すソース (仮想パス) のリスト。
+     * 上記 backend と組み合わさって、FilesystemBackend 経由でディスク上の
+     * SKILL.md が読み込まれる。frontmatter だけをシステムプロンプトに
+     * 注入し、本体 Markdown は agent がタスクで必要としたときだけ read される
+     * (Progressive Disclosure)。
+     *
+     * 注意: deepagents v1.9 の仕様では、ここで指定した skills が自動で
+     * サブエージェントに継承されるのは `general-purpose` のみ。本プロジェクトの
+     * 5 観点 + critic の custom subagent は継承されないため、次タスクで
+     * 各 subagent factory の `skills` フィールドに個別割当する。
+     */
+    skills: [...skills],
     /**
      * HITL (spec-006) のために checkpointer と interruptOn を配線する。
      * interruptOn に指定したツール名の tool call が発生すると、deepagents は
