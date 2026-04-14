@@ -9,7 +9,7 @@ import {
   StateBackend,
   StoreBackend,
 } from "deepagents";
-import type { InterruptOnConfig } from "langchain";
+import type { AgentMiddleware, InterruptOnConfig } from "langchain";
 import { InMemoryStore, MemorySaver } from "@langchain/langgraph-checkpoint";
 import type {
   BaseCheckpointSaver,
@@ -21,6 +21,16 @@ import { createMaintenanceHealthSubAgent } from "./subagents/maintenance-health"
 import { createApiStabilitySubAgent } from "./subagents/api-stability";
 import { createCommunityAdoptionSubAgent } from "./subagents/community-adoption";
 import { createCriticSubAgent } from "./subagents/critic";
+import {
+  createToolCallLoggingMiddleware,
+  createFileToolCallLogSink,
+  type ToolCallLogSink,
+} from "./middleware/logging";
+import {
+  createGithubRateLimitMiddleware,
+  type GithubRateLimitMiddlewareOptions,
+} from "./middleware/rate-limit";
+import { createValidateToolArgsMiddleware } from "./middleware/validate";
 
 /**
  * OpenRouter 経由で利用するモデル名。
@@ -157,6 +167,76 @@ export const DEFAULT_SKILL_SOURCES: readonly string[] = [
   "/skills/report/",
 ] as const;
 
+/**
+ * ツール呼び出し構造化ログの既定出力先 (spec-008)。
+ *
+ * spec-008 の Acceptance Criteria が指定するパス。`createAuditAgent` の
+ * default middleware が ToolCallLoggingMiddleware をこのパスに向ける。
+ * テストでは `middleware: []` や `middleware: createDefaultAuditMiddlewares(...)`
+ * + in-memory sink を渡して上書きできる。
+ */
+export const DEFAULT_TOOL_CALL_LOG_PATH = "out/.state/tool-calls.jsonl" as const;
+
+export interface CreateDefaultAuditMiddlewaresOptions {
+  /**
+   * ToolCallLoggingMiddleware が流す先の sink。省略時は
+   * {@link DEFAULT_TOOL_CALL_LOG_PATH} に書き込む file sink。テストでは
+   * in-memory sink (配列に push するだけ) を渡すと I/O ゼロで決定論化できる。
+   */
+  readonly toolCallLogSink?: ToolCallLogSink;
+  /**
+   * ToolCallLoggingMiddleware の file sink を作るときのパスを上書きする。
+   * `toolCallLogSink` が明示的に渡されている場合は無視される。
+   */
+  readonly toolCallLogPath?: string;
+  /**
+   * GithubRateLimitMiddleware に渡す追加オプション。`minIntervalMs` / `toolNames` /
+   * `now` / `sleep` をそのまま流す。テストでは `sleep` mock を差し込んで実時間
+   * ゼロでスロットル挙動を検証する。
+   */
+  readonly rateLimit?: GithubRateLimitMiddlewareOptions;
+}
+
+/**
+ * `createAuditAgent` のデフォルト middleware スタックを組み立てる。
+ *
+ * **順序**: `[logging, validate, rate-limit]`
+ *
+ * langchain の `utils.js` の `chainToolCallHandlers` は `middleware[0]` を
+ * **outermost** として合成する (L315 の `for (let i = length-2; i >= 0; i--)`)。
+ * つまりこの配列の左から右が「外 → 内」の順になる。
+ *
+ *   1. **logging (outermost)**: tool 呼び出しのあらゆる試行 (成功 / エラー /
+ *      validation rejection) を全部記録する。rejection は `[validate]` を含む
+ *      resultPreview として success event に現れる。
+ *   2. **validate (middle)**: 不正引数を rate-limit の sleep が走る前に弾く。
+ *      rejection 時は handler を呼ばずに `ToolMessage` を返すので、logging は
+ *      それを一つの結果として記録するが rate-limit は起動しない。
+ *   3. **rate-limit (innermost)**: validate を通った呼び出しにだけスロットルを
+ *      かける。`lastStartAt` が不正呼び出しで進まないので、後続の有効な
+ *      呼び出しへの遅延が無駄に長くなることも無い。
+ *
+ * 順序を入れ替えると意味が変わる:
+ *   - logging を最内にすると validation rejection がログに出ない
+ *   - validate を最内にすると rate-limit が不正呼び出しでも sleep を挿入する
+ *   - rate-limit を logging より外にすると sleep 時間が logging の `durationMs`
+ *     に混入する (本物の tool 実行時間と区別がつかなくなる)
+ */
+export function createDefaultAuditMiddlewares(
+  options: CreateDefaultAuditMiddlewaresOptions = {},
+): readonly AgentMiddleware[] {
+  const sink =
+    options.toolCallLogSink ??
+    createFileToolCallLogSink(
+      options.toolCallLogPath ?? DEFAULT_TOOL_CALL_LOG_PATH,
+    );
+  return [
+    createToolCallLoggingMiddleware({ sink }),
+    createValidateToolArgsMiddleware(),
+    createGithubRateLimitMiddleware(options.rateLimit ?? {}),
+  ];
+}
+
 export const DEFAULT_INTERRUPT_ON: Record<string, InterruptOnConfig> = {
   fetch_github: {
     allowedDecisions: ["approve", "reject"],
@@ -242,6 +322,23 @@ export interface CreateAuditAgentOptions {
    * メインの skills を継承する仕様)。
    */
   readonly skills?: readonly string[];
+
+  /**
+   * spec-008 の middleware スタック。tool 呼び出しに対する logging / validate /
+   * rate-limit の 3 つを束ねたもの。
+   *
+   * 省略時は {@link createDefaultAuditMiddlewares} が返す `[logging, validate,
+   * rate-limit]` の 3 本構成。logging は {@link DEFAULT_TOOL_CALL_LOG_PATH} に
+   * file sink で書き込む。
+   *
+   * 空配列 `[]` を渡すと middleware を一切付与しない (ユニットテストや HITL
+   * のみをテストしたいときに使える逃し弁)。部分的に差し替えたい場合は
+   * `createDefaultAuditMiddlewares({ toolCallLogSink, rateLimit })` を呼んで
+   * その戻り値を渡すのが推奨。任意の middleware 順序で自力組立も可能。
+   *
+   * 順序のセマンティクスは `createDefaultAuditMiddlewares` の JSDoc を参照。
+   */
+  readonly middleware?: readonly AgentMiddleware[];
 }
 
 export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
@@ -250,6 +347,7 @@ export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
   const interruptOn = options.interruptOn ?? DEFAULT_INTERRUPT_ON;
   const skillsRootDir = options.skillsRootDir ?? DEFAULT_SKILLS_ROOT_DIR;
   const skills = options.skills ?? DEFAULT_SKILL_SOURCES;
+  const middleware = options.middleware ?? createDefaultAuditMiddlewares();
   return createDeepAgent({
     model: createLlm(),
     systemPrompt: AUDIT_SYSTEM_PROMPT,
@@ -315,5 +413,17 @@ export function createAuditAgent(options: CreateAuditAgentOptions = {}) {
      */
     checkpointer,
     interruptOn,
+    /**
+     * spec-008 middleware スタック。default は
+     * `[logging, validate, rate-limit]` の 3 本で、langchain の
+     * `chainToolCallHandlers` が左から右に向けて "外 → 内" の順で合成する。
+     * 順序の根拠と入れ替え時の意味変化は `createDefaultAuditMiddlewares` の
+     * JSDoc を参照すること。
+     *
+     * middleware の戻り型 (langchain の AgentMiddleware) は `readonly` を
+     * 直接は受け付けないため、mutable な配列にコピーしてから渡す。元の配列を
+     * ここで変更しないので不変性は保たれる。
+     */
+    middleware: [...middleware],
   });
 }
