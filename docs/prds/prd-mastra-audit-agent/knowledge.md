@@ -178,6 +178,29 @@ createDeepAgent({
 
 **helper 側 `store.put` と agent 側 `write_file` の非対称性**: helper の `writeMemoryJson` は `store.put` を直接呼ぶためアップサート (上書き) が成立する。一方 deepagents の `write_file` ツールは内部で `StoreBackend.write` を呼び、line 4428 で「既存ファイルへの write はエラー」と弾く。このため CLI 側で先に `/memories/audit-policy.json` を seed したあと、agent 側から同じパスに書きたい場合は **`edit_file` を使う必要がある** (`write_file` だと "Cannot write because it already exists" で失敗する)。逆向きの round-trip (agent が write → helper が read) は問題なく動く。
 
+### HITL 実行ループ: pure core + thin entry で interrupt/resume を書く
+
+spec-006 の 2 番目のタスクで CLI 側の HITL ハンドラを実装した。`src/cli.ts` 本体は触らず、新規に **`src/hitl.ts`** に pure core を置き、`scripts/run-audit.ts` に対話 I/O (readline-based policy) と実行ループを薄く載せる 2 層構成にした。
+
+**pure core (`src/hitl.ts`) に置くもの**:
+
+1. `detectHitlInterrupt(state)` — `state.__interrupt__?.[0]` を返すだけ。ただし型ガードで null / 非配列 / プリミティブを全部弾く (runtime で壊れた state を受け取っても throw しない)
+2. `resolveHitlInterrupt(interrupt, policy)` — 各 `ActionRequest` に policy を適用して `HITLResponse` を組み立てる。`reviewConfigs` との対応付けは actionName での先着優先 Map 索引
+3. `formatActionForHuman(action, review)` — 多行文字列の整形。JSON.stringify の例外 (循環参照) を catch してフォールバックメッセージを返すのがポイント — 実運用で agent が壊れた state を吐いたときに CLI が落ちるのを防ぐ
+4. `APPROVE_ALL_POLICY` / `REJECT_ALL_POLICY` — CI やテスト用のプリセット。preset を export しておくと後続テストで `fakePolicy = APPROVE_ALL_POLICY` で 1 行 DI できる
+
+**thin entry (`scripts/run-audit.ts`) に置くもの**:
+
+1. `consolePolicy` — readline で stdin/stdout を掴んで承認/却下を聞く。**action ごとに `rl` を開閉**する実装にしている: ループをまたいで rl を使い回すと stdin が閉じない / 再入時にハングするバグを踏みやすく、HITL の頻度 (1 監査で 5〜10 回) なら毎回開き直しても体感差は無い
+2. HITL ループ: `invoke → detect → resolve → invoke(Command({resume}))` を while で回す。**`MAX_HITL_ITERATIONS = 20` の安全装置**を置き、policy がバグで reject を連発して agent が無限に新しい interrupt を生み続けるような事故を早期に検出する
+3. `thread_id` は `crypto.randomUUID()` で毎回新規発行。`Date.now()` は並行実行時の衝突リスクがあるので避ける。MemorySaver は thread 単位で state を分離するので、CLI 1 呼び出しが別の実行と干渉しない
+
+**テスト戦略**: pure core はユニットテスト (`tests/hitl.test.ts`) で 23 ケース完全カバー。`scripts/run-audit.ts` の HITL ループは top-level await + `process.exit` を含むため**ユニットテストせず**、代わりに `--help` 実行を shell で 1 回叩いて import chain が壊れていないかだけ確認する (spec-001 で `runCli` を pure 分離したのと同じ戦略の再利用)。pure core が十分に縛られていれば、thin entry 側のループはコードレビューと目視で十分。
+
+**`Decision.type` の narrowing**: `Decision` は `ApproveDecision | EditDecision | RejectDecision` の union で、`message` は `RejectDecision` だけが持つ。テストで `decision.message` を読むときは `if (decision.type === "reject")` で narrowing してからアクセスする必要がある。これを忘れると TS2339 "Property 'message' does not exist on type 'ApproveDecision'" で弾かれる。
+
+**`noUncheckedIndexedAccess` と配列直アクセス**: 本プロジェクトの `tsconfig.json` は `noUncheckedIndexedAccess: true` で、`seen[0].actionName` のような直アクセスは `T | undefined` を返す。テストでは `const first = seen[0]; expect(first?.actionName)...` のように一度変数に取って optional chaining するか、明示的に `expect(first).toBeDefined()` してから `!` で non-null assertion する。配列 index が多いテストで踏みやすいので、vitest + `noUncheckedIndexedAccess` の組み合わせでは assertion helper を用意しておくと楽。
+
 ### HITL 配線 (checkpointer + interruptOn) のツール選定基準
 
 spec-006 の最初のタスクで `createAuditAgent()` に `checkpointer` (`MemorySaver`) と `interruptOn` を追加した。v1.9 の `humanInTheLoopMiddleware` は **ツール名単位** で interrupt を発火するため、**引数 (パス) でフィルタできない**。この制約を知らずに `write_file` を interrupt 対象に入れると、各サブエージェントが `/raw/<aspect>/result.json` を書くたびに中断がかかり、監査が事実上進まなくなる。
