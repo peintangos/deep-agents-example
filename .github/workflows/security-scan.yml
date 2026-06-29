@@ -2,20 +2,6 @@ name: Security Scan
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "17 3 * * 1"
-  push:
-    branches:
-      - main
-    paths:
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/security-scan.yml"
-  pull_request:
-    paths:
-      - "package.json"
-      - "package-lock.json"
-      - ".github/workflows/security-scan.yml"
 
 concurrency:
   group: security-scan-${{ github.workflow }}-${{ github.ref }}
